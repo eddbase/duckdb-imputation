@@ -1,6 +1,6 @@
 
 
-#include <triple/helper.h>
+#include "helper.h"
 
 #include <triple/sum/sum.h>
 #include <triple/mul.h>
@@ -15,7 +15,7 @@
 #include <duckdb/function/aggregate_function.hpp>
 #include <duckdb/parser/parsed_data/create_scalar_function_info.hpp>
 
-namespace Triple {
+namespace ML_lib {
 
     void register_functions(duckdb::ClientContext &context, const std::vector<size_t> &n_con_columns, const std::vector<size_t> &n_cat_columns){
 
@@ -41,7 +41,7 @@ namespace Triple {
                 xx = std::to_string(s);
                 s++;
             }
-            auto sum_no_lift = duckdb::AggregateFunction("triple_sum_no_lift"+xx, args_sum_no_lift,
+            auto sum_no_lift = duckdb::AggregateFunction("sum_to_triple"+xx, args_sum_no_lift,
                                                          duckdb::LogicalTypeId::STRUCT,
                                                          duckdb::AggregateFunction::StateSize<Triple::SumState>,
                                                          duckdb::AggregateFunction::StateInitialize<Triple::SumState, Triple::StateFunction>,
@@ -110,23 +110,7 @@ namespace Triple {
         duckdb::CreateScalarFunctionInfo custom_lift_info(custom_lift);
         info.schema = DEFAULT_SCHEMA;
         context.RegisterFunction(custom_lift_info);
-        //
-        //Define update hack function
-        /*
-        duckdb::vector<duckdb::LogicalType> args_update = {};
-        args_update.push_back(duckdb::LogicalType::BOOLEAN);
-        for(int i=0; i < n_con_columns; i++)
-            args_update.push_back(duckdb::LogicalType::FLOAT);
 
-        duckdb::ScalarFunction update("update", args_update, duckdb::LogicalType::FLOAT, Triple::ImputeHackFunction, Triple::ImputeHackBind, nullptr,
-                                      Triple::ImputeHackStats);
-        update.null_handling = duckdb::FunctionNullHandling::SPECIAL_HANDLING;
-        update.serialize = duckdb::VariableReturnBindData::Serialize;
-        update.deserialize = duckdb::VariableReturnBindData::Deserialize;
-        duckdb::CreateScalarFunctionInfo update_info(update);
-        info.schema = DEFAULT_SCHEMA;
-        context.RegisterFunction(update_info);
-        */
 
     }
 
