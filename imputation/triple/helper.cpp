@@ -19,7 +19,7 @@ namespace ML_lib {
 
     void register_functions(duckdb::ClientContext &context, const std::vector<size_t> &n_con_columns, const std::vector<size_t> &n_cat_columns){
 
-        auto function = duckdb::AggregateFunction("triple_sum", {duckdb::LogicalType::ANY}, duckdb::LogicalTypeId::STRUCT, duckdb::AggregateFunction::StateSize<Triple::SumState>,
+        auto function = duckdb::AggregateFunction("sum_triple", {duckdb::LogicalType::ANY}, duckdb::LogicalTypeId::STRUCT, duckdb::AggregateFunction::StateSize<Triple::SumState>,
                                                   duckdb::AggregateFunction::StateInitialize<Triple::SumState, Triple::StateFunction>, Triple::Sum,
                                                   Triple::SumStateCombine, Triple::SumStateFinalize, nullptr, Triple::SumBind,
                                                   duckdb::AggregateFunction::StateDestroy<Triple::SumState, Triple::StateFunction>, nullptr, nullptr);
@@ -69,7 +69,7 @@ namespace ML_lib {
 
         //impute LDA
 
-        duckdb::ScalarFunction lda_predict("predict_lda", {duckdb::LogicalType::ANY}, duckdb::LogicalTypeId::INTEGER, LDA_impute, LDA_impute_bind, nullptr,
+        duckdb::ScalarFunction lda_predict("lda_predict", {duckdb::LogicalType::ANY}, duckdb::LogicalTypeId::INTEGER, LDA_impute, LDA_impute_bind, nullptr,
                                    LDA_impute_stats);
         lda_predict.varargs = duckdb::LogicalType::ANY;
         lda_predict.null_handling = duckdb::FunctionNullHandling::SPECIAL_HANDLING;
@@ -101,7 +101,7 @@ namespace ML_lib {
 
         //custom lift
 
-        duckdb::ScalarFunction custom_lift("lift", {}, duckdb::LogicalTypeId::STRUCT, Triple::CustomLift, Triple::CustomLiftBind, nullptr,
+        duckdb::ScalarFunction custom_lift("to_cofactor", {}, duckdb::LogicalTypeId::STRUCT, Triple::CustomLift, Triple::CustomLiftBind, nullptr,
                                            Triple::CustomLiftStats);
         custom_lift.varargs = duckdb::LogicalType::ANY;
         custom_lift.null_handling = duckdb::FunctionNullHandling::SPECIAL_HANDLING;

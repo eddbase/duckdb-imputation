@@ -43,3 +43,30 @@ Compile with
 cmake .
 make
 ```
+
+It will build duckdb (`CMAKE_BINARY_DIR/lib/duckdb/install/lib/libduckdb`) and our library (`CMAKE_BINARY_DIR/libduckdb_library`) as shared library, so you can use them in your code. Make sure you copy the header files for duckdb (`CMAKE_BINARY_DIR/lib/duckdb/install/include`) and this library (`imputation/include`) and add them to your code.
+
+## Usage
+
+Use `ML_lib::register_functions (duckdb::ClientContext &context)` to add the functions introduced in this library in DuckDB
+
+```
+#include <duckdb.hpp>
+#include <helper.h>
+
+...
+
+duckdb::DuckDB db(":memory:");
+duckdb::Connection con(db);
+
+ML_lib::register_functions(*con.context);
+```
+
+## Functions
+
+
+* `to_cofactor(columns)`: Returns a triple of aggregates. Generates a triple data structure from a tuple. The data type of the columns indicate if it's a numerical (float) or categorical (integer) type.
+* `sum_triple (triple)`: Aggregate function, returns a triple. Sums multiple triple aggregates and generate a resulting triple
+* `sum_to_triple (columns)`: Aggregate function, returns a triple. Generates a triple aggregate which represents the sum of the table. Equivalent to `sum_triple(to_cofactor(columns))` but faster. The data type of the columns indicate if it's a numerical (float) or categorical (integer) type.
+* `multiply_triple(triple)`: Multiply two triples together returning the resulting triple
+* `lda_predict`

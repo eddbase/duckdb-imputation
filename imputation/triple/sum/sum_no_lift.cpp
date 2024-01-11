@@ -48,7 +48,7 @@ Triple::SumNoLiftBind(duckdb::ClientContext &context, duckdb::AggregateFunction 
     auto struct_type = LogicalType::STRUCT(struct_children);
     function.return_type = struct_type;
     //set arguments
-    function.varargs = LogicalType::ANY;
+    //function.varargs = LogicalType::ANY;
     return duckdb::make_uniq<duckdb::VariableReturnBindData>(function.return_type);
 }
 

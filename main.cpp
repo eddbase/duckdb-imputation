@@ -2,7 +2,7 @@
 
 #include <duckdb.hpp>
 
-#include "helper.h"
+#include <helper.h>
 #include "partition.h"
 
 #include <vector>
