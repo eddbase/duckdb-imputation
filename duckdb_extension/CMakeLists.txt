@@ -19,7 +19,7 @@ set(LOADABLE_EXTENSION_NAME ${TARGET_NAME}_loadable_extension)
 project(${TARGET_NAME})
 include_directories(src/include)
 
-set(EXTENSION_SOURCES src/duckdb_imputation_extension.cpp src/triple/sum/sum.cpp src/triple/sum/sum_state.cpp src/triple/lift.cpp src/triple/sum/sum_no_lift.cpp src/triple/mul.cpp src/ML/regression.cpp src/ML/lda.cpp src/ML/qda.cpp src/ML/naive_bayes.cpp src/ML/utils.cpp src/utils.cpp)
+set(EXTENSION_SOURCES src/triple/sum/sum_nb_agg.cpp src/triple/mul_nb.cpp src/triple/lift_to_nb_agg.cpp src/triple/sum/sum_to_nb_agg.cpp src/duckdb_imputation_extension.cpp src/triple/sum/sum.cpp src/triple/sum/sum_state.cpp src/triple/lift.cpp src/triple/sum/sum_no_lift.cpp src/triple/mul.cpp src/ML/regression.cpp src/ML/lda.cpp src/ML/qda.cpp src/ML/naive_bayes.cpp src/ML/utils.cpp src/utils.cpp)
 
 build_static_extension(${TARGET_NAME} ${EXTENSION_SOURCES})
 build_loadable_extension(${TARGET_NAME} " " ${EXTENSION_SOURCES})

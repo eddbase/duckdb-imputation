@@ -2,6 +2,11 @@
 #include "duckdb/function/scalar/nested_functions.hpp"
 #include <triple/sum/sum_state.h>
 
+#include <iostream>
+
+/*
+ * Combine states for triple and nb aggregates
+ */
 void
 Triple::SumStateCombine(duckdb::Vector &state, duckdb::Vector &combined, duckdb::AggregateInputData &aggr_input_data,
                         idx_t count) {
@@ -11,43 +16,72 @@ Triple::SumStateCombine(duckdb::Vector &state, duckdb::Vector &combined, duckdb:
   state.ToUnifiedFormat(count, sdata);
   auto states_ptr = (Triple::SumState **) sdata.data;
 
+  //std::cout<<"SUMSTATECOMBINE"<<std::endl;
+
   auto combined_ptr = duckdb::FlatVector::GetData<Triple::SumState *>(combined);
 
   for (idx_t i = 0; i < count; i++) {
     auto state = states_ptr[sdata.sel->get_index(i)];
     combined_ptr[i]->count += state->count;
     if (combined_ptr[i]->lin_agg == nullptr && combined_ptr[i]->quad_num_cat == nullptr) {//init
-
+      combined_ptr[i]->is_nb_aggregates = state->is_nb_aggregates;
       combined_ptr[i]->num_attributes = state->num_attributes;
       combined_ptr[i]->cat_attributes = state->cat_attributes;
       if(state->num_attributes > 0) {
-        combined_ptr[i]->lin_agg = new float[state->num_attributes +
-                                             ((state->num_attributes * (state->num_attributes + 1)) / 2)];
+        if (!state->is_nb_aggregates)
+          combined_ptr[i]->lin_agg = new float[state->num_attributes +
+                                               ((state->num_attributes * (state->num_attributes + 1)) / 2)];
+        else
+          combined_ptr[i]->lin_agg = new float[state->num_attributes + state->num_attributes];
+
 
         combined_ptr[i]->quadratic_agg = &(combined_ptr[i]->lin_agg[state->num_attributes]);
+
 
         for (idx_t k = 0; k < state->num_attributes; k++)
           combined_ptr[i]->lin_agg[k] = 0;
 
-        for (idx_t k = 0; k < (state->num_attributes * (state->num_attributes + 1)) / 2; k++)
-          combined_ptr[i]->quadratic_agg[k] = 0;
+        if(!state->is_nb_aggregates) {
+          for (idx_t k = 0; k < (state->num_attributes * (state->num_attributes + 1)) / 2; k++)
+            combined_ptr[i]->quadratic_agg[k] = 0;
+        }
+        else{
+          for (idx_t k = 0; k < (state->num_attributes); k++)
+            combined_ptr[i]->quadratic_agg[k] = 0;
+        }
       }
 
       if(state->cat_attributes > 0) {
         combined_ptr[i]->quad_num_cat = new std::map<int, std::vector<float>>[state->cat_attributes];//boost::container::flat_map<int, std::vector<float>>[state->cat_attributes];
-
-        combined_ptr[i]->quad_cat_cat = new std::map<std::pair<int, int>, float>[//boost::container::flat_map<std::pair<int, int>, float>[
-            state->cat_attributes * (state->cat_attributes + 1) / 2];
+        if(!state->is_nb_aggregates)
+          combined_ptr[i]->quad_cat_cat = new std::map<std::pair<int, int>, float>[//boost::container::flat_map<std::pair<int, int>, float>[
+              state->cat_attributes * (state->cat_attributes + 1) / 2];
       }
     }
+    /*
+    if(state->quad_cat_cat == nullptr)
+      std::cout<<"quad_cat_cat null"<<std::endl;
+    else
+      std::cout<<"quad_cat_cat not null"<<std::endl;
+    if(combined_ptr[i]->quad_cat_cat == nullptr)
+      std::cout<<"combined null"<<std::endl;
+    else
+      std::cout<<"combined not null"<<std::endl;
+      */
 
     //SUM NUMERICAL STATES
     for (int j = 0; j < combined_ptr[i]->num_attributes; j++) {
       combined_ptr[i]->lin_agg[j] += state->lin_agg[j];
     }
-    for (int j = 0; j < combined_ptr[i]->num_attributes*(combined_ptr[i]->num_attributes+1)/2; j++) {
-      combined_ptr[i]->quadratic_agg[j] += state->quadratic_agg[j];
-    }
+    if(!state->is_nb_aggregates)
+      for (int j = 0; j < combined_ptr[i]->num_attributes*(combined_ptr[i]->num_attributes+1)/2; j++) {
+        combined_ptr[i]->quadratic_agg[j] += state->quadratic_agg[j];
+      }
+    else
+      for (int j = 0; j < combined_ptr[i]->num_attributes; j++) {
+        combined_ptr[i]->quadratic_agg[j] += state->quadratic_agg[j];
+      }
+
     //SUM CATEGORICAL STATES
     //num*categorical (and count)
     for (int j = 0; j < combined_ptr[i]->cat_attributes; j++) {
@@ -63,14 +97,16 @@ Triple::SumStateCombine(duckdb::Vector &state, duckdb::Vector &combined, duckdb:
     }
 
     //categorical*categorical
-    for (int j = 0; j < combined_ptr[i]->cat_attributes*(combined_ptr[i]->cat_attributes+1)/2; j++) {
-      auto &taget_map = combined_ptr[i]->quad_cat_cat[j];
-      for (auto const& state_vals : state->quad_cat_cat[j]){//search in combine states map state values
-        auto pos = taget_map.find(state_vals.first);
-        if (pos == taget_map.end())
-          taget_map[state_vals.first] = state_vals.second;
-        else
-          pos->second += state_vals.second;
+    if(!state->is_nb_aggregates){
+      for (int j = 0; j < combined_ptr[i]->cat_attributes*(combined_ptr[i]->cat_attributes+1)/2; j++) {
+        auto &taget_map = combined_ptr[i]->quad_cat_cat[j];
+        for (auto const& state_vals : state->quad_cat_cat[j]){//search in combine states map state values
+          auto pos = taget_map.find(state_vals.first);
+          if (pos == taget_map.end())
+            taget_map[state_vals.first] = state_vals.second;
+          else
+            pos->second += state_vals.second;
+        }
       }
     }
   }
@@ -90,6 +126,8 @@ void Triple::SumStateFinalize(duckdb::Vector &state_vector, duckdb::AggregateInp
   auto &children = duckdb::StructVector::GetEntries(result);
   duckdb::Vector &c1 = *(children[0]);//N
   auto input_data = (int32_t *) duckdb::FlatVector::GetData(c1);
+  if(count == 0)
+    return ;
 
   for (idx_t i=0;i<count; i++) {
     const auto row_id = i + offset;
@@ -105,8 +143,14 @@ void Triple::SumStateFinalize(duckdb::Vector &state_vector, duckdb::AggregateInp
     duckdb::ListVector::Reserve(c2, states[sdata.sel->get_index(0)]->num_attributes * count);
     duckdb::ListVector::SetListSize(c2, states[sdata.sel->get_index(0)]->num_attributes * count);
 
-    duckdb::ListVector::Reserve(c3, ((states[sdata.sel->get_index(0)]->num_attributes * (states[sdata.sel->get_index(0)]->num_attributes +1))/2) * count);
-    duckdb::ListVector::SetListSize(c3, ((states[sdata.sel->get_index(0)]->num_attributes * (states[sdata.sel->get_index(0)]->num_attributes +1))/2) * count);
+    if(states[sdata.sel->get_index(0)]->is_nb_aggregates){
+      duckdb::ListVector::Reserve(c3, states[sdata.sel->get_index(0)]->num_attributes * count);
+      duckdb::ListVector::SetListSize(c3, states[sdata.sel->get_index(0)]->num_attributes * count);
+    }
+    else{
+      duckdb::ListVector::Reserve(c3, ((states[sdata.sel->get_index(0)]->num_attributes * (states[sdata.sel->get_index(0)]->num_attributes +1))/2) * count);
+      duckdb::ListVector::SetListSize(c3, ((states[sdata.sel->get_index(0)]->num_attributes * (states[sdata.sel->get_index(0)]->num_attributes +1))/2) * count);
+    }
   }
 
   c2.SetVectorType(duckdb::VectorType::FLAT_VECTOR);
@@ -114,6 +158,7 @@ void Triple::SumStateFinalize(duckdb::Vector &state_vector, duckdb::AggregateInp
   auto num_lin_res = duckdb::FlatVector::GetData<float>(duckdb::ListVector::GetEntry(c2));
   auto num_cat_res = duckdb::FlatVector::GetData<float>(duckdb::ListVector::GetEntry(c3));
 
+  //copy lin agg
   for (idx_t i = 0; i < count; i++) {
     auto state = states[sdata.sel->get_index(i)];
     const auto row_id = i + offset;
@@ -128,15 +173,30 @@ void Triple::SumStateFinalize(duckdb::Vector &state_vector, duckdb::AggregateInp
   //set quadratic attributes
   c3.SetVectorType(duckdb::VectorType::FLAT_VECTOR);
   auto result_data2 = duckdb::ListVector::GetData(c3);
-  for (idx_t i = 0; i < count; i++) {
-    auto state = states[sdata.sel->get_index(i)];
-    const auto row_id = i + offset;
-    for (int j = 0; j < state->num_attributes*(state->num_attributes+1)/2; j++) {
-      num_cat_res[j + (i*(state->num_attributes*(state->num_attributes+1)/2))] = state->quadratic_agg[j];
-    }//Value::Numeric
-    result_data2[row_id].length = state->num_attributes*(state->num_attributes+1)/2;
-    result_data2[row_id].offset = i * result_data2[i].length;
-    //std::cout<<"quad len: "<<result_data2[row_id].length<<"quad offs: "<<result_data2[row_id].offset<<std::endl;
+
+  if(states[sdata.sel->get_index(0)]->is_nb_aggregates) {
+    for (idx_t i = 0; i < count; i++) {
+      auto state = states[sdata.sel->get_index(i)];
+      const auto row_id = i + offset;
+      for (int j = 0; j < state->num_attributes; j++) {
+        num_cat_res[j + (i*(state->num_attributes))] = state->quadratic_agg[j];
+      }//Value::Numeric
+      result_data2[row_id].length = state->num_attributes;
+      result_data2[row_id].offset = i * result_data2[i].length;
+      //std::cout<<"quad len: "<<result_data2[row_id].length<<"quad offs: "<<result_data2[row_id].offset<<std::endl;
+    }
+  }
+  else{
+    for (idx_t i = 0; i < count; i++) {
+      auto state = states[sdata.sel->get_index(i)];
+      const auto row_id = i + offset;
+      for (int j = 0; j < state->num_attributes*(state->num_attributes+1)/2; j++) {
+        num_cat_res[j + (i*(state->num_attributes*(state->num_attributes+1)/2))] = state->quadratic_agg[j];
+      }//Value::Numeric
+      result_data2[row_id].length = state->num_attributes*(state->num_attributes+1)/2;
+      result_data2[row_id].offset = i * result_data2[i].length;
+      //std::cout<<"quad len: "<<result_data2[row_id].length<<"quad offs: "<<result_data2[row_id].offset<<std::endl;
+    }
   }
 
   //categorical sums
@@ -147,16 +207,16 @@ void Triple::SumStateFinalize(duckdb::Vector &state_vector, duckdb::AggregateInp
   auto result_data3 = duckdb::ListVector::GetData(c4);
 
   //num*cat
-  duckdb::Vector &c5 = *(children[4]);
-  D_ASSERT(c5.GetType().id() == duckdb::LogicalTypeId::LIST);
-  c5.SetVectorType(duckdb::VectorType::FLAT_VECTOR);
-  auto result_data4 = duckdb::ListVector::GetData(c5);
+  if(!states[sdata.sel->get_index(0)]->is_nb_aggregates) {
+    duckdb::Vector &c5 = *(children[4]);
+    D_ASSERT(c5.GetType().id() == duckdb::LogicalTypeId::LIST);
+    c5.SetVectorType(duckdb::VectorType::FLAT_VECTOR);
 
-  //cat*cat
-  duckdb::Vector &c6 = *(children[5]);
-  D_ASSERT(c6.GetType().id() == duckdb::LogicalTypeId::LIST);
-  c6.SetVectorType(duckdb::VectorType::FLAT_VECTOR);
-  auto result_data5 = duckdb::ListVector::GetData(c6);
+    // cat*cat
+    duckdb::Vector &c6 = *(children[5]);
+    D_ASSERT(c6.GetType().id() == duckdb::LogicalTypeId::LIST);
+    c6.SetVectorType(duckdb::VectorType::FLAT_VECTOR);
+  }
 
   duckdb::list_entry_t *sublist_metadata_lin_cat = nullptr;
   duckdb::list_entry_t *sublist_metadata_num_cat = nullptr;
@@ -192,24 +252,29 @@ void Triple::SumStateFinalize(duckdb::Vector &state_vector, duckdb::AggregateInp
       duckdb::ListVector::Reserve(c4, cat_attributes * count);
       duckdb::ListVector::SetListSize(c4, cat_attributes * count);
     }
-    {
-      c5.SetVectorType(duckdb::VectorType::FLAT_VECTOR);
-      duckdb::Vector cat_relations_vector = duckdb::ListVector::GetEntry(c5);
-      duckdb::ListVector::Reserve(cat_relations_vector, n_keys_cat_columns * num_attributes);
-      duckdb::ListVector::SetListSize(cat_relations_vector, n_keys_cat_columns * num_attributes);
-      duckdb::ListVector::Reserve(c5, cat_attributes * num_attributes * count);
-      duckdb::ListVector::SetListSize(c5, cat_attributes * num_attributes * count);
-    }
-    {
-      c6.SetVectorType(duckdb::VectorType::FLAT_VECTOR);
-      duckdb::Vector cat_relations_vector = duckdb::ListVector::GetEntry(c6);
-      duckdb::ListVector::Reserve(cat_relations_vector, n_items_cat_cat);
-      duckdb::ListVector::SetListSize(cat_relations_vector, n_items_cat_cat);
-      duckdb::ListVector::Reserve(c6, ((cat_attributes * (cat_attributes+1))/2) * count);
-      duckdb::ListVector::SetListSize(c6, ((cat_attributes * (cat_attributes+1))/2) * count);
+    if(!states[sdata.sel->get_index(0)]->is_nb_aggregates) {
+      {
+        duckdb::Vector &c5 = *(children[4]);
+        c5.SetVectorType(duckdb::VectorType::FLAT_VECTOR);
+        duckdb::Vector cat_relations_vector = duckdb::ListVector::GetEntry(c5);
+        duckdb::ListVector::Reserve(cat_relations_vector, n_keys_cat_columns * num_attributes);
+        duckdb::ListVector::SetListSize(cat_relations_vector, n_keys_cat_columns * num_attributes);
+        duckdb::ListVector::Reserve(c5, cat_attributes * num_attributes * count);
+        duckdb::ListVector::SetListSize(c5, cat_attributes * num_attributes * count);
+      }
+      {
+        duckdb::Vector &c6 = *(children[5]);
+        c6.SetVectorType(duckdb::VectorType::FLAT_VECTOR);
+        duckdb::Vector cat_relations_vector = duckdb::ListVector::GetEntry(c6);
+        duckdb::ListVector::Reserve(cat_relations_vector, n_items_cat_cat);
+        duckdb::ListVector::SetListSize(cat_relations_vector, n_items_cat_cat);
+        duckdb::ListVector::Reserve(c6, ((cat_attributes * (cat_attributes+1))/2) * count);
+        duckdb::ListVector::SetListSize(c6, ((cat_attributes * (cat_attributes+1))/2) * count);
+      }
     }
   }
 
+  //define lin_cat
   if(cat_attributes > 0){
     duckdb::Vector cat_relations_vector = duckdb::ListVector::GetEntry(c4);
     sublist_metadata_lin_cat = duckdb::ListVector::GetData(cat_relations_vector);
@@ -225,10 +290,50 @@ void Triple::SumStateFinalize(duckdb::Vector &state_vector, duckdb::AggregateInp
 
   }
 
+  idx_t idx_element = 0;
+  idx_t sublist_idx_lin_cat = 0;
+  idx_t skipped_lin_cat = 0;
 
+
+  if(states[sdata.sel->get_index(0)]->is_nb_aggregates){
+    //set lin_cat and end if nb_aggregate
+    for (idx_t i = 0; i < count; i++) {
+      auto state = states[sdata.sel->get_index(i)];
+      const auto row_id = i + offset;
+
+      for (int j = 0; j < state->cat_attributes; j++) {
+        const auto &ordered = state->quad_num_cat[j];//map of categorical column j
+        for (auto const& state_val : ordered){//for each key of the cat. variable...
+          auto &num_vals = state_val.second;
+          //set lin_agg
+          cat_set_val_key_lin_cat[idx_element] = state_val.first;
+          cat_set_val_val_lin_cat[idx_element] = num_vals[0];
+          idx_element++;
+        }
+        sublist_metadata_lin_cat[sublist_idx_lin_cat].length = ordered.size();
+        sublist_metadata_lin_cat[sublist_idx_lin_cat].offset = skipped_lin_cat;
+        skipped_lin_cat += ordered.size();
+        sublist_idx_lin_cat++;
+      }
+      result_data3[row_id].length = state->cat_attributes;
+      result_data3[row_id].offset = i * result_data3[row_id].length;
+    }
+    return;
+  }
+
+  //non nb aggregates
   //categorical num*cat
 
-  if(cat_attributes > 0) {
+
+  duckdb::Vector &c5 = *(children[4]);
+  auto result_data4 = duckdb::ListVector::GetData(c5);
+
+  // cat*cat
+  duckdb::Vector &c6 = *(children[5]);
+  auto result_data5 = duckdb::ListVector::GetData(c6);
+
+  if(cat_attributes > 0 && !states[sdata.sel->get_index(0)]->is_nb_aggregates) {
+    duckdb::Vector &c5 = *(children[4]);
     duckdb::Vector cat_relations_vector = duckdb::ListVector::GetEntry(c5);
     sublist_metadata_num_cat = duckdb::ListVector::GetData(cat_relations_vector);
     duckdb::Vector cat_relations_vector_sub = duckdb::ListVector::GetEntry(
@@ -241,11 +346,11 @@ void Triple::SumStateFinalize(duckdb::Vector &state_vector, duckdb::AggregateInp
     cat_set_val_val_num_cat = duckdb::FlatVector::GetData<float>(*((lin_struct_vector)[1]));
   }
 
-  idx_t idx_element = 0;
+  idx_element = 0;
   idx_t sublist_idx_num_cat = 0;
-  idx_t sublist_idx_lin_cat = 0;
+  sublist_idx_lin_cat = 0;
   idx_t skipped_num_cat = 0;
-  idx_t skipped_lin_cat = 0;
+  skipped_lin_cat = 0;
 
   size_t row_offset = 0;
   for (idx_t i = 0; i < count; i++) {

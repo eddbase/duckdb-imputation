@@ -1,0 +1,11 @@
+.DS_Store
+.vscode
+.idea
+duckdb_extension/duckdb
+duckdb_extension/docs
+duckdb_extension/build
+duckdb_extension/duckdb_unittest_tempdir
+postgres/CMakeFiles
+postgres/CMakeCache.txt
+postgres/Makefile
+postgres/cmake_install.cmake

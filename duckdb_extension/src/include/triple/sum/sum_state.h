@@ -15,6 +15,7 @@ struct SumState {
   int count;
   int num_attributes;
   int cat_attributes;
+  bool is_nb_aggregates;
 
   //int num_keys_total_categories;
 
@@ -33,6 +34,7 @@ struct StateFunction {
     state.count = 0;
     state.num_attributes = 0;
     state.cat_attributes = 0;
+    state.is_nb_aggregates = false;
 
     state.lin_agg = nullptr;
     state.quadratic_agg = nullptr;

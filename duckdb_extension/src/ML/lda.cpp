@@ -172,7 +172,7 @@ void lda_train(duckdb::DataChunk &args, duckdb::ExpressionState &state, duckdb::
 
   cofactor cofactor;
   std::cerr<<"a"<<std::endl;
-  extract_data(args.data[0], cofactor);//duckdb::value passed as
+  extract_data(args.data[0], &cofactor, 1);//duckdb::value passed as
   std::cerr<<"a"<<std::endl;
   size_t num_params = sizeof_sigma_matrix(cofactor, label);
   std::cerr<<"num params "<<num_params<<std::endl;
@@ -273,9 +273,6 @@ void lda_train(duckdb::DataChunk &args, duckdb::ExpressionState &state, duckdb::
   delete[] coef;
   delete[] sigma_matrix;
   
-  std::cerr<<"write output "<<std::endl;
-
-  //test
   result.SetVectorType(duckdb::VectorType::CONSTANT_VECTOR);
   duckdb::ListVector::Reserve(result, d.size());
   duckdb::ListVector::SetListSize(result, d.size());
@@ -284,8 +281,6 @@ void lda_train(duckdb::DataChunk &args, duckdb::ExpressionState &state, duckdb::
   //auto metadata_out = duckdb::ListVector::GetData(duckdb::ListVector::GetEntry(result));
   metadata_out[0].offset = 0;
   metadata_out[0].length = d.size();
-
-
 
   for(size_t i=0; i<d.size(); i++){
     out_data[i] = (float) (d[i]);

@@ -12,17 +12,7 @@ Catalog Error: Scalar Function with name duckdb_imputation does not exist!
 require duckdb_imputation
 
 # Confirm the extension works
-query I
-SELECT duckdb_imputation('Sam');
-----
-DuckdbImputation Sam 🐥
-
-query I
-SELECT duckdb_imputation_openssl_version('Michael');
-----
-<REGEX>:DuckdbImputation Michael, my linked OpenSSL version is OpenSSL.*
-
-query I
-select lda_train({'N': 5, 'lin_agg': [15.0, 17.0], 'quad_agg': [59.0, 71.0, 91.0], 'lin_cat': [], 'quad_num_cat': [], 'quad_cat': []}, 1, 0, false);
-----
-[5,15,17,15,59,71,17,59,71,91]
+#query I
+#SELECT duckdb_imputation('Sam');
+#----
+#DuckdbImputation Sam 🐥

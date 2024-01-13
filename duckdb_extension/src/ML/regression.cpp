@@ -10,21 +10,11 @@
 #include <iostream>
 #include <algorithm>
 #include <utils.h>
+#include <vector>
 
 extern "C" void dgemv (char *TRANSA, int *M, int* N, double *ALPHA,
                       double *A, int *LDA, double *X, int *INCX, double *BETA, double *Y, int *INCY);
 
-
-void print_matrix(size_t sz, const std::vector<double> &m)
-{
-  for (size_t i = 0; i < sz; i++)
-  {
-    for(size_t j = 0; j < sz; j++)
-    {
-      std::cout<<i<<", "<<j<<" -> "<< m[(i * sz) + j];
-    }
-  }
-}
 
 void compute_gradient(size_t num_params, size_t label_idx,
                       const double* sigma, const std::vector<double> &params,
@@ -116,16 +106,19 @@ void ML::ridge_linear_regression(duckdb::DataChunk &args, duckdb::ExpressionStat
   float lambda = args.data[3].GetValue(0).GetValue<float>();
   int max_num_iterations = args.data[4].GetValue(0).GetValue<int>();
   bool compute_variance = args.data[5].GetValue(0).GetValue<bool>();
+  bool normalize = args.data[6].GetValue(0).GetValue<bool>();
 
   cofactor cofactor;
-  extract_data(args.data[0], cofactor);//duckdb::value passed as
+  extract_data(args.data[0], &cofactor, 1);//duckdb::value passed as
 
   if (cofactor.num_continuous_vars <= label) {
     std::cout<<"label ID >= number of continuous attributes";
     //return {};
   }
 
-  size_t num_params = sizeof_sigma_matrix(cofactor, -1);
+  uint64_t *cat_array = NULL;
+  uint32_t *cat_vars_idxs = NULL;
+  size_t num_params = n_cols_1hot_expansion(&cofactor, 1, &cat_vars_idxs, &cat_array, 0);//tot columns include label as well
 
   std::vector <double> grad(num_params, 0);
   std::vector <double> prev_grad(num_params, 0);
@@ -134,11 +127,17 @@ void ML::ridge_linear_regression(duckdb::DataChunk &args, duckdb::ExpressionStat
   double *sigma = new double[num_params * num_params]();
   std::vector <double> update(num_params, 0);
 
-  build_sigma_matrix(cofactor, num_params, -1, sigma);
+  build_sigma_matrix(cofactor, num_params, -1, cat_array, cat_vars_idxs, 0, sigma);
+  double *means = NULL;
+  double *std = NULL;
+  if (normalize){
+    means = new double [num_params];
+    std = new double [num_params];
+    standardize_sigma(sigma, num_params, means, std);
+  }
 
 
-  for (size_t i = 0; i < num_params; i++)
-  {
+  for (size_t i = 0; i < num_params; i++){
     learned_coeff[i] = 0; // ((double) (rand() % 800 + 1) - 400) / 100;
   }
 
@@ -219,7 +218,7 @@ void ML::ridge_linear_regression(duckdb::DataChunk &args, duckdb::ExpressionStat
     prev_error = error;
     //std::cout<<"Error "<<error<<"\n";
     num_iterations++;
-  } while (num_iterations < 1000 || num_iterations < max_num_iterations);
+  } while (num_iterations < max_num_iterations);
   double variance = 0;
   if(compute_variance){
     //compute variance for stochastic linear regression
@@ -246,138 +245,238 @@ void ML::ridge_linear_regression(duckdb::DataChunk &args, duckdb::ExpressionStat
     learned_coeff.push_back(variance);
   }
 
+  if (normalize){//rescale coeff. because of standardized dataset
+    for (size_t i=1; i<num_params; i++)
+      learned_coeff[i] = (learned_coeff[i] / std[i]) * std[label];
 
-  //std::cout<< "num_iterations = "<< num_iterations;
-  // export params to pgpsql
+    learned_coeff[0] = (learned_coeff[0]* std[label]) + means[label];
+  }
+
   delete[] sigma;
-
-  //return learned_coeff;
-}
+  result.SetVectorType(duckdb::VectorType::CONSTANT_VECTOR);
 
 
+  size_t learned_params_size = num_params;
+  if (cofactor.num_categorical_vars > 0)//there are categorical variables, store unique vars and idxs
+    num_params += cat_vars_idxs[cofactor.num_categorical_vars] + cofactor.num_categorical_vars;
+
+  if(normalize){
+    num_params += (learned_params_size - 2);//need to store mean for each column (except label and constant term)
+  }
+  num_params --;//no label element, variance not counted
 
 
-
-//DataChunk is a set of vectors
-
-class duckdb::BoundFunctionExpression : public duckdb::Expression {
-public:
-  static constexpr const ExpressionClass TYPE = ExpressionClass::BOUND_FUNCTION;
-
-public:
-  BoundFunctionExpression(LogicalType return_type, ScalarFunction bound_function,
-                          vector<unique_ptr<Expression>> arguments, unique_ptr<FunctionData> bind_info,
-                          bool is_operator = false);
-
-  //! The bound function expression
-  ScalarFunction function;
-  //! List of child-expressions of the function
-  vector<unique_ptr<Expression>> children;
-  //! The bound function data (if any)
-  unique_ptr<FunctionData> bind_info;
-  //! Whether or not the function is an operator, only used for rendering
-  bool is_operator;
-
-public:
-  bool HasSideEffects() const override;
-  bool IsFoldable() const override;
-  string ToString() const override;
-  bool PropagatesNullValues() const override;
-  hash_t Hash() const override;
-  bool Equals(const BaseExpression *other) const;
-
-  unique_ptr<Expression> Copy() override;
-  void Verify() const override;
-
-  //void Serialize(FieldWriter &writer) const override;
-  //static unique_ptr<Expression> Deserialize(ExpressionDeserializationState &state, FieldReader &reader);
-};
-
-namespace duckdb {
-struct ListStats {
-  DUCKDB_API static void Construct(BaseStatistics &stats);
-
-  DUCKDB_API static BaseStatistics CreateUnknown(LogicalType type);
-
-  DUCKDB_API static BaseStatistics CreateEmpty(LogicalType type);
-
-  DUCKDB_API static const BaseStatistics &GetChildStats(const BaseStatistics &stats);
-
-  DUCKDB_API static BaseStatistics &GetChildStats(BaseStatistics &stats);
-
-  DUCKDB_API static void SetChildStats(BaseStatistics &stats, unique_ptr<BaseStatistics> new_stats);
-
-  //DUCKDB_API static void Serialize(const BaseStatistics &stats, FieldWriter &writer);
-
-  //DUCKDB_API static BaseStatistics Deserialize(FieldReader &reader, LogicalType type);
-
-  DUCKDB_API static string ToString(const BaseStatistics &stats);
-
-  DUCKDB_API static void Merge(BaseStatistics &stats, const BaseStatistics &other);
-
-  DUCKDB_API static void Copy(BaseStatistics &stats, const BaseStatistics &other);
-
-  DUCKDB_API static void
-  Verify(const BaseStatistics &stats, Vector &vector, const SelectionVector &sel, idx_t count);
-};
-}
-
-namespace ML {
-//actual implementation of this function
-//make sure first argument is boolean mask and second one value to update
-
-void ImputeHackFunction(duckdb::DataChunk &args, duckdb::ExpressionState &state, duckdb::Vector &result) {
-  //std::cout << "StructPackFunction start " << std::endl;
-  //col, list of params
-
-  idx_t rows = args.size();//n. of rows to return
-  duckdb::vector<duckdb::Vector> &in_data = args.data;
-  idx_t columns = in_data.size();
-  //std::cout<<"Intermediate chunk \n";
-
-  for(size_t i=0; i<columns;i++){
-    RecursiveFlatten(args.data[i], rows);
-    D_ASSERT((args.data[i]).GetVectorType() == duckdb::VectorType::FLAT_VECTOR);
+  if(!compute_variance) {
+    duckdb::ListVector::Reserve(result, num_params);
+    duckdb::ListVector::SetListSize(result, num_params);
+  }
+  else {
+    duckdb::ListVector::Reserve(result, num_params +1);
+    duckdb::ListVector::SetListSize(result, num_params +1);
   }
 
-  auto mask = (bool *) duckdb::FlatVector::GetData(args.data[0]);//first child (N)
-  auto update_col = (float *) duckdb::FlatVector::GetData(args.data[1]);//first child (N)
-  auto result_ptr = (float *) result.GetData();//useless
+  auto out_data = duckdb::ConstantVector::GetData<float>(duckdb::ListVector::GetEntry(result));
+  auto metadata_out = duckdb::ListVector::GetData(result);
+  //auto metadata_out = duckdb::ListVector::GetData(duckdb::ListVector::GetEntry(result));
+  metadata_out[0].offset = 0;
+  if(!compute_variance)
+    metadata_out[0].length = num_params;
+  else
+    metadata_out[0].length = num_params+1;
 
-  for(size_t i=0; i<rows; i++){
-    //float res = 0;
-    //state.intermediate_chunk.data[1].GetData()[i] = 666;
-    if(mask[i]){
-      float new_val = 12345;
-      state.intermediate_chunk.SetValue(1, i, duckdb::Value(12345));
-      //for(size_t j=2; j<columns;j++){
-      //    new_val += duckdb::FlatVector::GetData(args.data[j])[i];
-      //}
-      //std::cout<<"CUrrent value: "<<update_col[i]<<"\n";
-      update_col[i] = new_val;
-      result_ptr[i] = new_val;
-      //std::cout<<"New value: "<<update_col[i];
-      //state.intermediate_chunk.SetValue(1, i, Value((float)666.4));
+  //copy values
+
+
+
+  out_data[0] = ((float)cofactor.num_categorical_vars);//size categorical columns
+
+  int idx_output = 1;
+  if (cofactor.num_categorical_vars > 0) {//there are categorical variables
+    //store categorical value indices of cat. columns (without label)
+    for (size_t i = 0; i < cofactor.num_categorical_vars + 1; i++) {
+      out_data[idx_output] = ((float) cat_vars_idxs[i]);
+      idx_output++;
     }
-    else
-      result_ptr[i] = update_col[i];
+    for (size_t i = 0; i < cat_vars_idxs[cofactor.num_categorical_vars]; i++) {
+      out_data[idx_output] = ((float) cat_array[i]);
+      idx_output++;
+    }
+  }
+
+  for (size_t i = 0; i < label; i++){//the first element is the constant term, so label element is label +1
+    out_data[idx_output] = (learned_coeff[i]);
+    idx_output++;
+  }
+  for (size_t i = label+1; i < learned_params_size; i++){
+    out_data[idx_output] = (learned_coeff[i]);
+    idx_output++;
+  }
+
+  if (normalize) {
+    for (size_t i = 1; i < label; i++) {
+      out_data[idx_output] = (means[i]);
+      idx_output++;
+    }
+    for (size_t i = label+1; i < learned_params_size; i++) {
+      out_data[idx_output] = (means[i]);
+      idx_output++;
+    }
+  }
+
+  if(compute_variance){
+    out_data[idx_output] = (sqrt(variance));//returns std instead of variance
+    idx_output++;
   }
 }
 
-//Returns the datatype used by this function
+
 duckdb::unique_ptr<duckdb::FunctionData>
-ImputeHackBind(duckdb::ClientContext &context, duckdb::ScalarFunction &function,
+ML::ridge_linear_regression_bind(duckdb::ClientContext &context, duckdb::ScalarFunction &function,
                duckdb::vector<duckdb::unique_ptr<duckdb::Expression>> &arguments) {
-  function.return_type = duckdb::LogicalType::FLOAT;
+
+  function.return_type = duckdb::LogicalType::LIST(duckdb::LogicalType::FLOAT);;
   return duckdb::make_uniq<duckdb::VariableReturnBindData>(function.return_type);
 }
 
-//Generate statistics for this function. Given input type ststistics (mainly min and max for every attribute), returns the output statistics
-duckdb::unique_ptr<duckdb::BaseStatistics>
-ImputeHackStats(duckdb::ClientContext &context, duckdb::FunctionStatisticsInput &input) {
-  auto &child_stats = input.child_stats;
-  auto &expr = input.expr;
-  auto stats = duckdb::BaseStatistics::CreateUnknown(expr.return_type);
-  return stats.ToUnique();
+
+duckdb::unique_ptr<duckdb::FunctionData>
+ML::linreg_impute_bind(duckdb::ClientContext &context, duckdb::ScalarFunction &function,
+                   duckdb::vector<duckdb::unique_ptr<duckdb::Expression>> &arguments){
+
+  auto struct_type = duckdb::LogicalType::FLOAT;
+  function.return_type = struct_type;
+  function.varargs = duckdb::LogicalType::ANY;
+  return duckdb::make_uniq<duckdb::VariableReturnBindData>(function.return_type);
+
 }
+
+unique_ptr<FunctionLocalState> ML::regression_init_state(ExpressionState &state, const BoundFunctionExpression &expr,
+                                                   FunctionData *bind_data) {
+  auto &info = bind_data->Cast<RegressionState>();
+  if(!info.random_seed_set){
+    FILE *istream = fopen("/dev/urandom", "rb");
+    assert(istream);
+    unsigned long seed = 0;
+    for (unsigned i = 0; i < sizeof seed; i++) {
+      seed *= (UCHAR_MAX + 1);
+      int ch = fgetc(istream);
+      assert(ch != EOF);
+      seed += (unsigned)ch;
+    }
+    fclose(istream);
+    srandom(seed);
+    info.random_seed_set = true;
+  }
+  return make_uniq<RegressionState>(info);
+}
+
+void ML::linreg_impute(duckdb::DataChunk &args, duckdb::ExpressionState &state, duckdb::Vector &result_array){
+
+  auto &r_state = ExecuteFunctionState::GetFunctionState(state)->Cast<RegressionState>();
+
+  duckdb::idx_t size = args.size();
+  duckdb::vector<duckdb::Vector> &in_data = args.data;
+  duckdb::RecursiveFlatten(args.data[0], size);
+  bool noise = args.data[1].GetValue(0).GetValue<bool>();
+  bool normalize = args.data[2].GetValue(0).GetValue<bool>();
+  int columns = in_data.size();
+  int num_cols = 0;
+  int cat_cols = 0;
+  duckdb::UnifiedVectorFormat input_data[1024];//todo vary length (columns)
+
+  for (idx_t j=3;j<columns;j++){
+    auto col_type = in_data[j].GetType();
+    in_data[j].ToUnifiedFormat(size, input_data[j-2]);
+    if (col_type == duckdb::LogicalType::FLOAT || col_type == duckdb::LogicalType::DOUBLE)
+      num_cols++;
+    else if (col_type == duckdb::LogicalType::INTEGER)
+      cat_cols++;
+  }
+  duckdb::ListVector::GetEntry(in_data[0]).ToUnifiedFormat(size, input_data[0]);
+
+  idx_t params_size = duckdb::ListVector::GetListSize(in_data[0]);
+  float *params = new float[params_size];
+  for(size_t i=0; i<params_size; i++){
+    params[i] = duckdb::UnifiedVectorFormat::GetData<float>(input_data[0])[input_data[0].sel->get_index(i)];
+  }
+
+
+  int n_cat_columns = (int) params[0];
+  int max_cat_vars_idx = 0;
+  size_t start_params = 1 + n_cat_columns;//skip n. cat. columns and idx_cat_vals is n.cols
+
+  if (n_cat_columns > 0) {
+    max_cat_vars_idx = (int)params[start_params];
+    start_params += max_cat_vars_idx +1;
+  }
+
+  for(size_t row=0; row<size; row++) {
+
+    double result = params[start_params]; // init with intercept
+
+    if (normalize) {
+      for (size_t i = 0; i < num_cols; i++) { // build num. pred.
+        result +=
+            ((double)(params[i + start_params + 1]) *
+             ((double)(duckdb::UnifiedVectorFormat::GetData<float>(input_data[i+1])[input_data[i+1].sel->get_index(row)]) -
+              (params[1 + num_cols + max_cat_vars_idx + start_params + i])));
+      }
+    } else {
+      for (size_t i = 0; i < num_cols; i++) { // build num. pred.
+        result += ((double)(params[i + start_params + 1]) *
+                   (double)duckdb::UnifiedVectorFormat::GetData<float>(input_data[i+1])[input_data[i+1].sel->get_index(row)]); // re-build index vector (begin:end of each cat. column)
+      }
+    }
+
+    for (size_t i = 0; i < cat_cols; i++) { // build cat. pred.
+      int curr_class = duckdb::UnifiedVectorFormat::GetData<int>(input_data[num_cols + 1 + i])[input_data[num_cols + 1 + i].sel->get_index(row)];
+      // search for class in cat array
+      int start = (int)(params[1 + i]);
+      int end = (int)(params[2 + i]);
+
+      size_t index = start;
+      while (index < end) {
+        if ((int)(params[index + 2 + n_cat_columns]) == curr_class)
+          break;
+        index++;
+      }
+      if (normalize) {
+        for (size_t j = start; j < index; j++) {
+          result +=
+              (double)((params[j + start_params + num_cols + 1]) *
+                       (0 - (params[1 + (2 * num_cols) + max_cat_vars_idx +
+                                    start_params + j])));
+        }
+        result += (double)((params[index + start_params + num_cols + 1]) *
+                           (1 - (params[1 + (2 * num_cols) + max_cat_vars_idx +
+                                        start_params + index])));
+        for (size_t j = index + 1; j < end; j++) {
+          result +=
+              (double)((params[j + start_params + num_cols + 1]) *
+                       (0 - (params[1 + (2 * num_cols) + max_cat_vars_idx +
+                                    start_params + j])));
+        }
+
+      } else {
+        result += (double)(params[index + start_params + num_cols +
+                                  1]); // skip continous vars, class idx and unique class
+      }
+    }
+
+    if (noise) {
+
+      double u1, u2;
+      do {
+        u1 = random() / (double)(RAND_MAX + 1.0);
+      } while (u1 == 0);
+      u2 = random() / (double)(RAND_MAX + 1.0);
+      // compute z0 and z1
+      double mag =
+          (params[params_size - 1]) * sqrt(-2.0 * log(u1)) * cos(2 * PI * u2);
+      result += mag;
+    }
+    // save result
+    result_array.SetValue(row, duckdb::Value(result));
+  }
+
 }
