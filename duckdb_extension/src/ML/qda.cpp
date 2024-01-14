@@ -10,6 +10,17 @@
 
 #include <duckdb/function/scalar/nested_functions.hpp>
 
+void print_matrix(size_t sz, const double *m)
+{
+  for (size_t i = 0; i < sz; i++)
+  {
+    for(size_t j = 0; j < sz; j++)
+    {
+      std::cout<< i <<", "<<j<<" -> "<<m[(i * sz) + j]<<std::endl;
+    }
+  }
+}
+
 extern "C" void dgemm (char *TRANSA, char* TRANSB, int *M, int* N, int *K, double *ALPHA,
                   double *A, int *LDA, double *B, int *LDB, double *BETA, double *C, int *LDC);
 
@@ -35,7 +46,7 @@ void ML::qda_train(duckdb::DataChunk &args, duckdb::ExpressionState &state,
   duckdb::RecursiveFlatten(in_labels, size);//these are lists
   //also labels in list
   //extract labels values
-
+  //std::cout<<"a"<<std::endl;
   bool normalize = args.data[2].GetValue(0).GetValue<bool>();
 
   int n_aggregates = duckdb::ListVector::GetListSize(in_cofactors);
@@ -45,8 +56,9 @@ void ML::qda_train(duckdb::DataChunk &args, duckdb::ExpressionState &state,
   int drop_first = 1;//PG_GETARG_INT64(2);
 
   //parse cofactor aggregates
+  //std::cout<<"B"<<std::endl;
 
-  const auto &labels = duckdb::ConstantVector::GetData<int>(duckdb::ListVector::GetEntry(in_cofactors));
+  const auto &labels = duckdb::ConstantVector::GetData<int>(duckdb::ListVector::GetEntry(in_labels));
 
   uint32_t *cat_idxs = NULL;
   uint64_t *cat_array = NULL;
@@ -67,19 +79,20 @@ void ML::qda_train(duckdb::DataChunk &args, duckdb::ExpressionState &state,
   if(normalize){
     res_size += m;
   }
+  //std::cout<<"c"<<std::endl;
 
   result.SetVectorType(duckdb::VectorType::CONSTANT_VECTOR);
-
   duckdb::ListVector::Reserve(result, res_size);
   duckdb::ListVector::SetListSize(result, res_size);
   auto out_data = duckdb::ConstantVector::GetData<float>(duckdb::ListVector::GetEntry(result));
   auto metadata_out = duckdb::ListVector::GetData(result);
-  //auto metadata_out = duckdb::ListVector::GetData(duckdb::ListVector::GetEntry(result));
   metadata_out[0].offset = 0;
   metadata_out[0].length = res_size;
+  //std::cout<<"res size "<<res_size<<std::endl;
 
   out_data[0] = (float) n_aggregates;
   size_t param_out_index = 2;
+  //std::cout<<"num_cat_vars "<<cofactor[0].num_categorical_vars<<std::endl;
 
   //save categorical (unique) values and begin:end indices in output
   if (cofactor[0].num_categorical_vars > 0) {
@@ -97,10 +110,14 @@ void ML::qda_train(duckdb::DataChunk &args, duckdb::ExpressionState &state,
 
   //copy labels
   for(size_t i=0; i<n_aggregates; i++) {
+    //std::cout<<"i: "<<i<<std::endl;
+    //std::cout<<"access: "<<param_out_index + i<<std::endl;
     out_data[param_out_index + i] =  (float) labels[i];
   }
 
+  //std::cout<<"out"<<std::endl;
   param_out_index += n_aggregates;
+  //std::cout<<"d"<<std::endl;
 
   double tot_tuples = 0;
   for(size_t i=0; i<n_aggregates; i++){
@@ -114,6 +131,7 @@ void ML::qda_train(duckdb::DataChunk &args, duckdb::ExpressionState &state,
     sigma_matrices[i] = new double [num_params * num_params];
     build_sigma_matrix(cofactor[i], num_params, -1, cat_array, cat_idxs, drop_first, sigma_matrices[i]);
   }
+  //std::cout<<"e"<<std::endl;
 
   //handle normalization
   double *means = NULL;
@@ -156,6 +174,7 @@ void ML::qda_train(duckdb::DataChunk &args, duckdb::ExpressionState &state,
       }
     } //end for each aggregate
   }
+  //std::cout<<"f"<<std::endl;
 
   for(size_t ii=0; ii<n_aggregates; ii++) {
 
@@ -185,6 +204,7 @@ void ML::qda_train(duckdb::DataChunk &args, duckdb::ExpressionState &state,
         sigma_matrix[(j*m)+k] /= count_tuples;//or / cofactor->count - num_categories
       }
     }
+    //std::cout<<"g"<<std::endl;
 
     //print_matrix(num_params-1, sigma_matrix);
 
@@ -220,6 +240,8 @@ void ML::qda_train(duckdb::DataChunk &args, duckdb::ExpressionState &state,
     double determinant = 1;
     for(int i=0; i<m; i++)
       determinant *= sing_values[i];
+
+    //std::cout<<"h"<<std::endl;
 
     //elog(WARNING, "determinant %lf", determinant);
     //calculate A+=(V*)TuT, use MKL ?GEMM function to calculate matrix multiplication
@@ -263,6 +285,7 @@ void ML::qda_train(duckdb::DataChunk &args, duckdb::ExpressionState &state,
       }
     }
     //elog(WARNING, "i");
+    //std::cout<<"i"<<std::endl;
 
     param_out_index += m;
     int row=1;
@@ -385,28 +408,30 @@ void ML::qda_impute(duckdb::DataChunk &args, duckdb::ExpressionState &state,
 
   //finished extracting values
 
+  size_t params_start_idx = start_params_idx;
+
   //for each tuple to predict...
   for (size_t j=0; j<size; j++){//like LDA, this is unnecessary expensive. A better implementation would
     //write all features of all rows in an array and solve the linear algebra operations once
 
     for (int i = 0; i < n_params; i++) {
-      features[j] = 0;
+      features[i] = 0;
     }
 
     //copy features
     for (int i = 0; i < num_cols; i++) {
-      features[i] = (double)  duckdb::UnifiedVectorFormat::GetData<float>(input_data[i+2])[input_data[i+2].sel->get_index(j)];
+      features[i] = (double)  duckdb::UnifiedVectorFormat::GetData<float>(input_data[i+1])[input_data[i+1].sel->get_index(j)];
     }
 
     for(int i=0; i<cat_cols; i++){//categorical feats (builds 1-hot encoded vector)
-      int in_class = duckdb::UnifiedVectorFormat::GetData<int>(input_data[i+2+num_cols])[input_data[i+2+num_cols].sel->get_index(j)];//cat_padding (1+n cont + value)
+      int in_class = duckdb::UnifiedVectorFormat::GetData<int>(input_data[i+1+num_cols])[input_data[i+1+num_cols].sel->get_index(j)];//cat_padding (1+n cont + value)
       size_t index = find_in_array(in_class, cat_vars, cat_vars_idxs[i], cat_vars_idxs[i+1]);
       if (index < cat_vars_idxs[i+1])
         features[index+num_cols] = 1;
     }
 
     if(normalize) {
-      size_t offset_params = start_params_idx + (((n_params*n_params) + n_params + 1)*n_classes);
+      size_t offset_params = params_start_idx + (((n_params*n_params) + n_params + 1)*n_classes);
       for (int i = 0; i < num_cols; i++) {
         features[i] -= (params[offset_params + i]);
       }
@@ -418,9 +443,11 @@ void ML::qda_impute(duckdb::DataChunk &args, duckdb::ExpressionState &state,
       }
     }
 
-
     size_t best_class = 0;
     double max_prob = -DBL_MAX;
+
+    start_params_idx = params_start_idx;
+
     for(size_t i=0; i<n_classes; i++){
       //copy qda params
       for(size_t j=0; j<n_params*n_params; j++){
@@ -432,9 +459,7 @@ void ML::qda_impute(duckdb::DataChunk &args, duckdb::ExpressionState &state,
       }
       start_params_idx += (n_params);
       double intercept = params[start_params_idx];
-
       start_params_idx++;
-
       //compute probability of given class with matrix multiplication
 
       char task = 'N';
@@ -462,15 +487,16 @@ void ML::qda_impute(duckdb::DataChunk &args, duckdb::ExpressionState &state,
     }
 
     int actual_class = (int) params[start_out_classes + best_class];
-    result.SetValue(j, duckdb::Value(actual_class));
+    //std::cout<<"predicting "<<actual_class<<std::endl;
 
+    result.SetValue(j, duckdb::Value(actual_class));
   }
+  //std::cout<<"i"<<std::endl;
 
   if (size_idxs > 0) {
     delete[] cat_vars_idxs;
     delete[] cat_vars;
   }
-
   delete[] features;
   delete[] quad_matrix;
   delete[] lin_matrix;

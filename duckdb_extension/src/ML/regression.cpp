@@ -111,6 +111,9 @@ void ML::ridge_linear_regression(duckdb::DataChunk &args, duckdb::ExpressionStat
   cofactor cofactor;
   extract_data(args.data[0], &cofactor, 1);//duckdb::value passed as
 
+  //for(size_t i=0; i<cofactor.lin.size(); i++)
+  //  std::cout<<"LINEAR AGG: "<<cofactor.lin[i]<<std::endl;
+
   if (cofactor.num_continuous_vars <= label) {
     std::cout<<"label ID >= number of continuous attributes";
     //return {};
@@ -135,6 +138,8 @@ void ML::ridge_linear_regression(duckdb::DataChunk &args, duckdb::ExpressionStat
     std = new double [num_params];
     standardize_sigma(sigma, num_params, means, std);
   }
+
+  //print_matrix(num_params, sigma);
 
 
   for (size_t i = 0; i < num_params; i++){
@@ -216,7 +221,7 @@ void ML::ridge_linear_regression(duckdb::DataChunk &args, duckdb::ExpressionStat
 
     step_size = compute_step_size(step_size, num_params, learned_coeff, prev_learned_coeff, grad, prev_grad);
     prev_error = error;
-    //std::cout<<"Error "<<error<<"\n";
+    //std::cout<<"Error "<<error<<std::endl;
     num_iterations++;
   } while (num_iterations < max_num_iterations);
   double variance = 0;
@@ -255,15 +260,18 @@ void ML::ridge_linear_regression(duckdb::DataChunk &args, duckdb::ExpressionStat
   delete[] sigma;
   result.SetVectorType(duckdb::VectorType::CONSTANT_VECTOR);
 
+  //std::cout<<"Num params 1: "<<num_params<<std::endl;
 
   size_t learned_params_size = num_params;
   if (cofactor.num_categorical_vars > 0)//there are categorical variables, store unique vars and idxs
-    num_params += cat_vars_idxs[cofactor.num_categorical_vars] + cofactor.num_categorical_vars;
+    num_params += cat_vars_idxs[cofactor.num_categorical_vars] + cofactor.num_categorical_vars+1;//# unique categoricals + idxs
+  //std::cout<<"Num params 2: "<<num_params<<std::endl;
 
   if(normalize){
     num_params += (learned_params_size - 2);//need to store mean for each column (except label and constant term)
   }
-  num_params --;//no label element, variance not counted
+  //num_params --;//no label element, variance not counted. However also need to store in [0] n. cat. vars
+  //std::cout<<"Num params 3: "<<num_params<<std::endl;
 
 
   if(!compute_variance) {
@@ -283,6 +291,8 @@ void ML::ridge_linear_regression(duckdb::DataChunk &args, duckdb::ExpressionStat
     metadata_out[0].length = num_params;
   else
     metadata_out[0].length = num_params+1;
+
+  //std::cout<<"Num params: "<<num_params<<std::endl;
 
   //copy values
 
@@ -305,10 +315,12 @@ void ML::ridge_linear_regression(duckdb::DataChunk &args, duckdb::ExpressionStat
 
   for (size_t i = 0; i < label; i++){//the first element is the constant term, so label element is label +1
     out_data[idx_output] = (learned_coeff[i]);
+    //std::cout<<"coeff "<<learned_coeff[i]<<std::endl;
     idx_output++;
   }
   for (size_t i = label+1; i < learned_params_size; i++){
     out_data[idx_output] = (learned_coeff[i]);
+    //std::cout<<"coeff "<<learned_coeff[i]<<std::endl;
     idx_output++;
   }
 

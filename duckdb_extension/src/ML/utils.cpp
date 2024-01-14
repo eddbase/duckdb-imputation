@@ -12,12 +12,12 @@ void extract_data(const duckdb::Vector &triple, cofactor *cofactor, size_t n_cof
   duckdb::Vector v_num_lin = duckdb::ListVector::GetEntry(*triple_struct[1]);
   duckdb::Vector v_num_quad = duckdb::ListVector::GetEntry(*triple_struct[2]);
   duckdb::Vector v_cat_lin = duckdb::ListVector::GetEntry(*triple_struct[3]);
-  std::cerr<<"a"<<std::endl;
+  //std::cerr<<"a"<<std::endl;
 
   for(size_t i=0; i<n_cofactor; i++)
     cofactor[i].N = duckdb::FlatVector::GetData<int32_t>(*triple_struct[0])[i];
 
-  std::cerr<<"err"<<std::endl;
+  //std::cerr<<"err"<<std::endl;
 
   //duckdb::child_list_t<duckdb::Value> struct_values;
   //const duckdb::vector<duckdb::Value> &linear = duckdb::ListValue::GetChildren(first_triple_children[1]);
@@ -26,7 +26,7 @@ void extract_data(const duckdb::Vector &triple, cofactor *cofactor, size_t n_cof
     cofactor[i].lin.reserve(cont_cols);
     cofactor[i].num_continuous_vars = cont_cols;
   }
-  std::cerr<<"b"<<std::endl;
+  //std::cerr<<"b"<<std::endl;
 
   //const duckdb::vector<duckdb::Value> &categorical = duckdb::ListValue::GetChildren(first_triple_children[3]);
   size_t cat_cols = duckdb::ListVector::GetListSize(*triple_struct[3])/n_cofactor;
@@ -40,21 +40,22 @@ void extract_data(const duckdb::Vector &triple, cofactor *cofactor, size_t n_cof
   auto lin_res_num = duckdb::FlatVector::GetData<float>(v_num_lin);
   //lin numerical
   for (size_t j=0; j<n_cofactor; j++) {
-    for (idx_t i = 0; i < cont_cols; i++)
-      cofactor[j].lin.push_back(lin_res_num[i + (j*cont_cols)]);
+    for (idx_t i = 0; i < cont_cols; i++) {
+      //std::cout<<"pushing "<<lin_res_num[i + (j * cont_cols)]<<std::endl;
+      cofactor[j].lin.push_back(lin_res_num[i + (j * cont_cols)]);
+    }
   }
-  std::cerr<<"c"<<std::endl;
 
   //copy lin. categorical
   if (duckdb::ListVector::GetListSize(*triple_struct[3]) > 0){
     //a list of struct
     duckdb::vector<duckdb::unique_ptr<duckdb::Vector>> &lin_struct_vector = duckdb::StructVector::GetEntries(duckdb::ListVector::GetEntry(v_cat_lin));//expands the struct data
-    std::cerr<<"d"<<std::endl;
+    //std::cerr<<"d"<<std::endl;
     auto cat_lin_keys = duckdb::FlatVector::GetData<int>(*((lin_struct_vector)[0]));
     auto cat_lin_vals = duckdb::FlatVector::GetData<float>(*((lin_struct_vector)[1]));//raw data
-    std::cerr<<"d"<<std::endl;
+    //std::cerr<<"d"<<std::endl;
     auto sublist_meta = duckdb::ListVector::GetData(v_cat_lin);
-    std::cerr<<"d"<<std::endl;
+    //std::cerr<<"d"<<std::endl;
     for(size_t k =0; k<n_cofactor; k++){
       for(idx_t i=0;i<cat_cols;i++) {//for each cat variable
         cofactor[k].lin_cat.emplace_back();//add new map
@@ -64,7 +65,7 @@ void extract_data(const duckdb::Vector &triple, cofactor *cofactor, size_t n_cof
       }
     }
   }
-  std::cerr<<"d"<<std::endl;
+  //std::cerr<<"d"<<std::endl;
 
 
   if(triple_struct.size() == 3){
@@ -92,7 +93,7 @@ void extract_data(const duckdb::Vector &triple, cofactor *cofactor, size_t n_cof
 
 
   //num*cat
-  std::cerr<<"e"<<std::endl;
+  //std::cerr<<"e"<<std::endl;
   //all should have the same columns
   if(cofactor[0].lin.size() > 0 && cofactor[0].lin_cat.size() > 0){
     duckdb::Vector v_num_cat_structs = duckdb::ListVector::GetEntry(v_num_cat_quad_1);//each list eleemnt is a struct
@@ -116,7 +117,7 @@ void extract_data(const duckdb::Vector &triple, cofactor *cofactor, size_t n_cof
     }
   }
 
-  std::cerr<<"f"<<std::endl;
+  //std::cerr<<"f"<<std::endl;
 
   if(cofactor[0].lin_cat.size() > 0){
 
