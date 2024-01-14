@@ -142,7 +142,12 @@ All the function which accept a varying number of columns accept maximum 1024 co
 
 ### ML functions
 
-At the moment these functions only operate with float/integers, while DuckDB tends to automatically cast datatype to numeric. Make sure to append `::STRUCT(N int, lin_agg FLOAT[], quad_agg FLOAT[], lin_cat STRUCT(key INT, value FLOAT)[][], quad_num_cat STRUCT(key INT, value FLOAT)[][], quad_cat STRUCT(key1 INT, key2 INT, value FLOAT)[][]` to triple aggregates and 
+At the moment these functions only operate with float/integers, while DuckDB tends to automatically cast datatype to numeric. Make sure to append 
+* Triple aggregates (Linear regression, LDA)`::STRUCT(N int, lin_agg FLOAT[], quad_agg FLOAT[], lin_cat STRUCT(key INT, value FLOAT)[][], quad_num_cat STRUCT(key INT, value FLOAT)[][], quad_cat STRUCT(key1 INT, key2 INT, value FLOAT)[][])`
+* List of triple aggregates (QDA)`::STRUCT(N int, lin_agg FLOAT[], quad_agg FLOAT[], lin_cat STRUCT(key INT, value FLOAT)[][], quad_num_cat STRUCT(key INT, value FLOAT)[][], quad_cat STRUCT(key1 INT, key2 INT, value FLOAT)[][])[]`
+* List of NB aggregates (Naive Bayes)`::STRUCT(N int, lin_agg FLOAT[], quad_agg FLOAT[], lin_cat STRUCT(key INT, value FLOAT)[])[]`
+
+#### Functions:
 
 * `lda_train`
 * `lda_predict`
@@ -150,10 +155,10 @@ At the moment these functions only operate with float/integers, while DuckDB ten
 * `linreg_predict (train_params, add_noise: boolean, normalize: boolean, columns)`
 * `qda_train (triples: triple[], labels: integer[], normalize: boolean)`
 * `qda_predict (params: float[], normalize: bool, columns)`
-* `nb_train`
-* `nb_predict`
+* `nb_train (nb_aggegates: nb_aggregates[], labels: int[])`
+* `nb_predict (params:float[], normalize: bool, columns)`
 
-### Example
+#### Example
 
 The following query computes a triple of aggregates over a join. A triple of aggregates for each table is computed at the beginning, grouping by the join key. They are then multiplied together and summed to compute the final aggregate.
 
@@ -165,6 +170,19 @@ select sum_triple(multiply_triple(A,B)) FROM
 	(SELECT gb as gb, sum_to_triple_2_2(a,c,d,f) AS B 
 		FROM test2 GROUP BY gb) as b 
 	on a.gb = b.gb;
+	
+```
+
+The following python code trains QDA over a table and generates prediction:
+
+```python
+triple = conn.sql("SELECT list(agg), list(target) FROM (SELECT sum_to_triple_4_0(s_length, s_width, p_length, p_width) as agg, target from iris_train group by target);").fetchall()
+str_triple = str(triple[0][0])
+str_labels = str(triple[0][1])
+cast = "::STRUCT(N int, lin_agg FLOAT[], quad_agg FLOAT[], lin_cat STRUCT(key INT, value FLOAT)[][], quad_num_cat STRUCT(key INT, value FLOAT)[][], quad_cat STRUCT(key1 INT, key2 INT, value FLOAT)[][])[]"
+query = "select qda_train("+str_triple+cast+", "+str_labels+"::int[], false)"
+params = conn.sql(query).fetchall()
+predict = conn.sql("SELECT id, qda_predict("+str(params[0][0])+"::float[], false, s_length, s_width, p_length, p_width) as pred from iris_test").df()
 	
 ```
 

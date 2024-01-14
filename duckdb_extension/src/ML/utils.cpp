@@ -67,8 +67,7 @@ void extract_data(const duckdb::Vector &triple, cofactor *cofactor, size_t n_cof
   }
   //std::cerr<<"d"<<std::endl;
 
-
-  if(triple_struct.size() == 3){
+  if(triple_struct.size() == 4){//nb agg
 
     auto quad_res_num = duckdb::FlatVector::GetData<float>(v_num_quad);
     for(size_t j=0; j<n_cofactor; j++){

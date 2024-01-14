@@ -21,20 +21,24 @@ void ML::nb_train(duckdb::DataChunk &args, duckdb::ExpressionState &state,
 
   int n_aggregates = duckdb::ListVector::GetListSize(in_cofactors);
 
+  //std::cout<<"a"<<std::endl;
 
   struct cofactor *cofactor = new struct cofactor[n_aggregates];
   extract_data(duckdb::ListVector::GetEntry(in_cofactors), cofactor, n_aggregates); // duckdb::value passed as
+  //std::cout<<"---"<<std::endl;
   int drop_first = 0;//PG_GETARG_INT64(2);
-  const auto &labels = duckdb::ConstantVector::GetData<int>(duckdb::ListVector::GetEntry(in_cofactors));
+  const auto &labels = duckdb::ConstantVector::GetData<int>(duckdb::ListVector::GetEntry(in_labels));
 
   uint64_t *cat_array = NULL; //max. size
   uint32_t *cat_vars_idxs = NULL; // track start each cat. variable
+  //std::cout<<"bbb"<<std::endl;
   size_t num_params = n_cols_1hot_expansion(cofactor, n_aggregates, &cat_vars_idxs, &cat_array, drop_first);//enable drop first
 
   float total_tuples = 0;
   for(size_t k=0; k<n_aggregates; k++) {
     total_tuples += cofactor[k].N;
   }
+  //std::cout<<"b"<<std::endl;
 
   //compute mean and variance for every numerical feature
   //result = n. aggregates (classes), n. cat. values (cat_array size), cat_array, probs for each class, mean, variance for every num. feat. in 1st aggregate, prob. each cat. value 1st aggregate, ...
@@ -65,6 +69,7 @@ void ML::nb_train(duckdb::DataChunk &args, duckdb::ExpressionState &state,
   metadata_out[0].offset = 0;
   metadata_out[0].length = res_size;
 
+  //std::cout<<"res size "<<res_size<<std::endl;
 
 
   out_data[0] = n_aggregates;
@@ -99,6 +104,7 @@ void ML::nb_train(duckdb::DataChunk &args, duckdb::ExpressionState &state,
   for(size_t i=0; i<n_aggregates; i++) {//each NB aggregate contains training data for a specific class
     //save here the frequency for categorical NB
     //these are the first NB parameters stored
+    //std::cout<<"i "<<i<<std::endl;
 
     out_data[start_priors+i] = cofactor[i].N / total_tuples;
 
@@ -202,8 +208,10 @@ void ML::nb_impute(duckdb::DataChunk &args, duckdb::ExpressionState &state,
     prior_offset = 2+cat_vars_idxs[size_idxs-1]+size_idxs+n_classes;
   }
 
+  size_t idx_start_params = k;
 
   for(size_t row=0; row<size; row++){
+    k = idx_start_params;
     int best_class = 0;
     double max_prob = 0;
     for(size_t i=0; i<n_classes; i++){
@@ -214,7 +222,7 @@ void ML::nb_impute(duckdb::DataChunk &args, duckdb::ExpressionState &state,
         double variance = (params[k+(j*2)+1]);
         variance += 0.000000001;//avoid division by 0
         double mean = (params[k+(j*2)]);
-        float in_cont_data = duckdb::UnifiedVectorFormat::GetData<float>(input_data[j+2])[input_data[j+2].sel->get_index(row)];
+        float in_cont_data = duckdb::UnifiedVectorFormat::GetData<float>(input_data[j+1])[input_data[j+1].sel->get_index(row)];
         total_prob *= ((double)1 / sqrt(2*M_PI*variance)) * exp( -(pow((in_cont_data - mean), 2)) / ((double)2*variance));
         //elog(WARNING, "total prob %f (normal mean %lf var %lf)", total_prob, mean, variance);
       }
@@ -222,7 +230,7 @@ void ML::nb_impute(duckdb::DataChunk &args, duckdb::ExpressionState &state,
       k += (2*num_cols);
       if (size_idxs > 0) {//if categorical features
         for (size_t j = 0; j < cat_cols; j++) {
-          int in_cat_class = duckdb::UnifiedVectorFormat::GetData<int>(input_data[j+2+num_cols])[input_data[j+2+num_cols].sel->get_index(row)];//cat_padding (1+n cont + value)
+          int in_cat_class = duckdb::UnifiedVectorFormat::GetData<int>(input_data[j+1+num_cols])[input_data[j+1+num_cols].sel->get_index(row)];//cat_padding (1+n cont + value)
           size_t index = find_in_array(in_cat_class, cat_vars, cat_vars_idxs[j], cat_vars_idxs[j + 1]);
           //elog(WARNING, "class %zu index %zu", class, index);
           if (index == cat_vars_idxs[j + 1])//class not found in train dataset
