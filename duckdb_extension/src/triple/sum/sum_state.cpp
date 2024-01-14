@@ -240,8 +240,6 @@ void Triple::SumStateFinalize(duckdb::Vector &state_vector, duckdb::AggregateInp
       auto state = states[sdata.sel->get_index(i)];
       for(idx_t j=0; j<cat_attributes; j++)
         n_keys_cat_columns += state->quad_num_cat[j].size();
-      for(idx_t j=0; j<(cat_attributes*(cat_attributes+1))/2; j++)
-        n_items_cat_cat += state->quad_cat_cat[j].size();
     }
 
     {
@@ -253,6 +251,14 @@ void Triple::SumStateFinalize(duckdb::Vector &state_vector, duckdb::AggregateInp
       duckdb::ListVector::SetListSize(c4, cat_attributes * count);
     }
     if(!states[sdata.sel->get_index(0)]->is_nb_aggregates) {
+
+      for (idx_t i = 0; i < count; i++) {
+        auto state = states[sdata.sel->get_index(i)];
+        for(idx_t j=0; j<(cat_attributes*(cat_attributes+1))/2; j++)
+          n_items_cat_cat += state->quad_cat_cat[j].size();
+      }
+
+
       {
         duckdb::Vector &c5 = *(children[4]);
         c5.SetVectorType(duckdb::VectorType::FLAT_VECTOR);

@@ -168,8 +168,6 @@ void Triple::multiply_nb(duckdb::DataChunk &args, duckdb::ExpressionState &state
       cat_attr_2_val_key = duckdb::UnifiedVectorFormat::GetData<int32_t>(v_tmp[0]);
       cat_attr_2_val_val = duckdb::UnifiedVectorFormat::GetData<float>(v_tmp[1]);
 
-      //cat_attr_2_val_key = duckdb::FlatVector::GetData<int>(*((v_cat_lin_1_struct)[0]));
-      //cat_attr_2_val_val = duckdb::FlatVector::GetData<float>(*((v_cat_lin_1_struct)[1]));
     }
   }
 
@@ -261,6 +259,11 @@ void Triple::multiply_nb(duckdb::DataChunk &args, duckdb::ExpressionState &state
       quad_res_num[set_index_num_quad] = quad_list_entries_2[quad_data[1].sel->get_index(j + (i * quad_lists_size_2))] * (N_1);
       set_index_num_quad++;
     }
+  }
+
+  for (duckdb::idx_t row = 0; row < size; row++) {
+    meta_quad_num[row].length = num_attr_size_1 + num_attr_size_2;
+    meta_quad_num[row].offset = row * meta_quad_num[row].length;
   }
 }
 

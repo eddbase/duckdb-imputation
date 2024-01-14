@@ -14,6 +14,9 @@ namespace Triple {
 //actual implementation of this function
 void CustomLift(duckdb::DataChunk &args, duckdb::ExpressionState &state, duckdb::Vector &result) {
   //std::cout << "StructPackFunction start " << std::endl;
+
+  //std::cout<<"B"<<std::endl;
+
   auto &result_children = duckdb::StructVector::GetEntries(result);
   idx_t size = args.size();//n. of rows to return
 
@@ -245,6 +248,8 @@ CustomLiftBind(duckdb::ClientContext &context, duckdb::ScalarFunction &function,
                duckdb::vector<duckdb::unique_ptr<duckdb::Expression>> &arguments) {
 
   //set return type
+
+  //std::cout<<"a"<<std::endl;
 
   duckdb::child_list_t<duckdb::LogicalType> struct_children;
   struct_children.emplace_back("N", duckdb::LogicalType::INTEGER);
