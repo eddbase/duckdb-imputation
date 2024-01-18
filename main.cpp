@@ -4,10 +4,7 @@
 
 #include <helper.h>
 #include "partition.h"
-
 #include <vector>
-#include <ML/lda.h>
-
 
 int main(){
     std::cout<<"Hello world";

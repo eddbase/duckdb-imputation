@@ -190,5 +190,10 @@ In the test directory you can find additional examples.
 
 ## Imputation
 
-TODO
-**MAKE SURE YOU ARE USING THE DUCKDB VERSION PATCHED WHEN YOU BUILT THE LIBRARY**
+The imputation code uses the DuckDB code available in `duckdb_extension/duckdb`. **MAKE SURE YOUR CODE IS PATCHED BEFORE USING THE IMPUTATION LIBRARY**
+
+### Compile 
+```
+cmake .
+make
+```
