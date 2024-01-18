@@ -11,9 +11,9 @@
 
 int main(){
     std::cout<<"Hello world";
-
-
-    duckdb::DuckDB db(":memory:");
+    duckdb::DBConfig c;
+    c.SetOption("allow_unsigned_extensions", duckdb::Value(true));
+    duckdb::DuckDB db(":memory:", &c);
     duckdb::Connection con(db);
 
     std::vector<std::string> con_columns = {"a", "b", "c"};;

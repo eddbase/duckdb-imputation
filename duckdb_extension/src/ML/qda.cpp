@@ -10,16 +10,7 @@
 
 #include <duckdb/function/scalar/nested_functions.hpp>
 
-void print_matrix(size_t sz, const double *m)
-{
-  for (size_t i = 0; i < sz; i++)
-  {
-    for(size_t j = 0; j < sz; j++)
-    {
-      std::cout<< i <<", "<<j<<" -> "<<m[(i * sz) + j]<<std::endl;
-    }
-  }
-}
+
 
 extern "C" void dgemm (char *TRANSA, char* TRANSB, int *M, int* N, int *K, double *ALPHA,
                   double *A, int *LDA, double *B, int *LDB, double *BETA, double *C, int *LDC);
@@ -64,6 +55,7 @@ void ML::qda_train(duckdb::DataChunk &args, duckdb::ExpressionState &state,
   uint64_t *cat_array = NULL;
   size_t num_params = n_cols_1hot_expansion(cofactor, n_aggregates, &cat_idxs, &cat_array, drop_first);//enable drop first
 
+
   int m = num_params-1;//remove constant term computed previously
   double *sing_values =new double [m];
   double *u = new double[m*m];
@@ -97,8 +89,9 @@ void ML::qda_train(duckdb::DataChunk &args, duckdb::ExpressionState &state,
   //save categorical (unique) values and begin:end indices in output
   if (cofactor[0].num_categorical_vars > 0) {
     out_data[1] = cofactor[0].num_categorical_vars + 1;
-    for(size_t i=0; i<cofactor[0].num_categorical_vars+1; i++)
-      out_data[i+2] = cat_idxs[i];
+    for(size_t i=0; i<cofactor[0].num_categorical_vars+1; i++) {
+        out_data[i + 2] = cat_idxs[i];
+    }
 
     param_out_index = cofactor[0].num_categorical_vars+3;
     for(size_t i=0; i<cat_idxs[cofactor[0].num_categorical_vars]; i++)
@@ -128,7 +121,7 @@ void ML::qda_train(duckdb::DataChunk &args, duckdb::ExpressionState &state,
   //double **sum_vectors = (double **)palloc0(sizeof(double **) * n_aggregates);
 
   for(size_t i=0; i<n_aggregates; i++) {
-    sigma_matrices[i] = new double [num_params * num_params];
+    sigma_matrices[i] = new double [num_params * num_params]();
     build_sigma_matrix(cofactor[i], num_params, -1, cat_array, cat_idxs, drop_first, sigma_matrices[i]);
   }
   //std::cout<<"e"<<std::endl;
@@ -452,6 +445,7 @@ void ML::qda_impute(duckdb::DataChunk &args, duckdb::ExpressionState &state,
       //copy qda params
       for(size_t j=0; j<n_params*n_params; j++){
         quad_matrix[j] = params[j + start_params_idx];
+        std::cout<<"qda "<<params[j + start_params_idx]<<" index "<<j + start_params_idx<<std::endl;
       }
       start_params_idx += (n_params*n_params);
       for(size_t j=0; j<n_params; j++){

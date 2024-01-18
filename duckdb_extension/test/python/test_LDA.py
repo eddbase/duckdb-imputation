@@ -6,7 +6,8 @@ import pandas as pd
 from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import r2_score
-from sklearn.linear_model import LinearRegression
+from sklearn.metrics import accuracy_score
+from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
 from sklearn.preprocessing import KBinsDiscretizer
 
 
@@ -42,7 +43,6 @@ def in_data():
 
     
     return [conn,df_train,df_test]
-    
 
 @pytest.fixture
 def in_data_cat():
@@ -59,9 +59,10 @@ def in_data_cat():
 
     est = KBinsDiscretizer(n_bins=4, encode='ordinal', strategy='uniform', subsample=None)
     df = data[0].rename(columns={"sepal length (cm)": "s_length", "sepal width (cm)": "s_width", "petal length (cm)": "p_length", "petal width (cm)": "p_width"})
-    train_data = est.fit_transform(df[["s_length", "s_width"]])
+    train_data = est.fit_transform(df[["s_length", "s_width", "p_length"]])
     df["s_length"] = train_data[:, 0]
     df["s_width"] = train_data[:, 1]
+    df["p_length"] = train_data[:, 2]
 
     df_train, df_test, y_train, y_test = train_test_split(df, data[1], test_size=0.33, random_state=42)
     df_train["target"] = y_train
@@ -73,24 +74,24 @@ def in_data_cat():
     df_train = df_train.reset_index(drop=True).reset_index().rename(columns={'index':'id'})
     df_test = df_test.reset_index(drop=True).reset_index().rename(columns={'index':'id'})
     
-    conn.sql('create table iris_train (id integer primary key, s_length integer, s_width integer, p_length float, p_width float, target integer);')
+    conn.sql('create table iris_train (id integer primary key, s_length integer, s_width integer, p_length integer, p_width float, target integer);')
     conn.sql("INSERT INTO iris_train SELECT * FROM df_train")
 
-    conn.sql('create table iris_test (id integer primary key, s_length integer, s_width integer, p_length float, p_width float, target integer);')
+    conn.sql('create table iris_test (id integer primary key, s_length integer, s_width integer, p_length integer, p_width float, target integer);')
     conn.sql("INSERT INTO iris_test SELECT * FROM df_test")
     
     
     df_encoded = df.rename(columns={"sepal length (cm)": "s_length", "sepal width (cm)": "s_width", "petal length (cm)": "p_length", "petal width (cm)": "p_width"})
     df_encoded = df_encoded.reset_index(drop=True).reset_index().rename(columns={'index':'id'})
-    df_encoded = pd.get_dummies(df_encoded, columns=['s_length','s_width'])
+    df_encoded = pd.get_dummies(df_encoded, columns=['s_length','s_width','p_length'])
     df_encoded["target"] = data[1]
     
     df_train_encoded, df_test_encoded = train_test_split(df_encoded, test_size=0.33, random_state=42)
     
     return [conn,df_train,df_test,df_train_encoded, df_test_encoded]
-    
 
-def test_lr_no_norm_cat(in_data_cat):
+
+def test_lda_no_norm_cat(in_data_cat):
     conn = in_data_cat[0]
     df_train = in_data_cat[1]
     df_test = in_data_cat[2]
@@ -98,67 +99,99 @@ def test_lr_no_norm_cat(in_data_cat):
     df_test_encoded=in_data_cat[4]
     
     
-    triple = conn.sql("SELECT sum_to_triple_2_3(p_width, p_length, s_length, s_width, target) as agg from iris_train;").fetchall()
+    triple = conn.sql("SELECT sum_to_triple_1_4(p_width, s_length, s_width, p_length, target) as agg from iris_train;").fetchall()
     str_triple = str(triple[0][0])
     cast = "::STRUCT(N int, lin_agg FLOAT[], quad_agg FLOAT[], lin_cat STRUCT(key INT, value FLOAT)[][], quad_num_cat STRUCT(key INT, value FLOAT)[][], quad_cat STRUCT(key1 INT, key2 INT, value FLOAT)[][])"
-    
-    query = "select linreg_train("+str_triple+cast+", 1::INTEGER, 0.001::FLOAT, 0::FLOAT, 10000::INTEGER, false, false)"
+    query = "select lda_train("+str_triple+cast+", 3, 0.01, false)"
     print(query)
     params = conn.sql(query).fetchall()
-    
-    result_pred = conn.sql("SELECT id, linreg_predict("+str(params[0][0])+"::FLOAT[], false, false, p_width, s_length, s_width, target) AS pred FROM iris_test").df()
-    
-    df_test = df_test[["id", "p_length"]].merge(result_pred, left_on='id', right_on='id')
-    r2_ddb = r2_score(df_test["p_length"], df_test["pred"])
-    
-    reg = LinearRegression().fit(df_train_encoded.drop(["p_length", "id"], axis=1), df_train_encoded["p_length"])
-    r2_py = reg.score(df_test_encoded.drop(["p_length", "id"], axis=1), df_test_encoded["p_length"])
-    
-    print("R2 SKLearn: ", r2_py, "R2 DDB: ", r2_ddb)
-    
-    assert (round(r2_py, 2) >= round(r2_ddb, 2) + 0.2 or round(r2_py, 2) +0.2 >= round(r2_ddb, 2))
 
-def test_linreg_no_norm(in_data):
+    
+    predict = conn.sql("SELECT id, lda_predict ("+str(params[0][0])+"::float[], false, p_width, s_length, s_width, p_length) as pred from iris_test").df()
+    
+    df_test = df_test[["id", "target"]].merge(predict, left_on='id', right_on='id')
+    acc_ddb = accuracy_score(df_test["target"], df_test["pred"])
+    
+    clf = LinearDiscriminantAnalysis(solver = 'lsqr', shrinkage=0)
+    clf.fit(df_train_encoded.drop(["target", "id"], axis=1), df_train_encoded["target"])
+    print("Accuracy SKLearn LDA: ", clf.score(df_test_encoded.drop(["target", "id"], axis=1), df_test["target"]))
+    acc_sklearn = clf.score(df_test_encoded.drop(["target", "id"], axis=1), df_test["target"])
+    
+    assert (round(acc_ddb, 3) == round(acc_sklearn, 3))
+
+    
+
+def test_lda_norm_cat(in_data_cat):
+    conn = in_data_cat[0]
+    df_train = in_data_cat[1]
+    df_test = in_data_cat[2]
+    df_train_encoded=in_data_cat[3]
+    df_test_encoded=in_data_cat[4]
+    
+    
+    triple = conn.sql("SELECT sum_to_triple_1_4(p_width, s_length, s_width, p_length, target) as agg from iris_train;").fetchall()
+    str_triple = str(triple[0][0])
+    cast = "::STRUCT(N int, lin_agg FLOAT[], quad_agg FLOAT[], lin_cat STRUCT(key INT, value FLOAT)[][], quad_num_cat STRUCT(key INT, value FLOAT)[][], quad_cat STRUCT(key1 INT, key2 INT, value FLOAT)[][])"
+    query = "select lda_train("+str_triple+cast+", 3, 0.01, true)"
+    print(query)
+    params = conn.sql(query).fetchall()
+
+    
+    predict = conn.sql("SELECT id, lda_predict ("+str(params[0][0])+"::float[], true, p_width, s_length, s_width, p_length) as pred from iris_test").df()
+    
+    df_test = df_test[["id", "target"]].merge(predict, left_on='id', right_on='id')
+    acc_ddb = accuracy_score(df_test["target"], df_test["pred"])
+    
+    clf = LinearDiscriminantAnalysis(solver = 'lsqr', shrinkage=0)
+    clf.fit(df_train_encoded.drop(["target", "id"], axis=1), df_train_encoded["target"])
+    print("Accuracy SKLearn LDA: ", clf.score(df_test_encoded.drop(["target", "id"], axis=1), df_test["target"]))
+    acc_sklearn = clf.score(df_test_encoded.drop(["target", "id"], axis=1), df_test["target"])
+    
+    assert (round(acc_ddb, 3) == round(acc_sklearn, 3))
+    
+    
+def test_lda_no_norm(in_data):
     conn = in_data[0]
     df_train = in_data[1]
     df_test = in_data[2]
-    triple = conn.sql("SELECT sum_to_triple_4_1(s_length, s_width, p_length, p_width, target) from iris_train;").fetchall()
+    
+    triple = conn.sql("SELECT sum_to_triple_4_1(s_length, s_width, p_length, p_width, target) as agg from iris_train;").fetchall()
     str_triple = str(triple[0][0])
     cast = "::STRUCT(N int, lin_agg FLOAT[], quad_agg FLOAT[], lin_cat STRUCT(key INT, value FLOAT)[][], quad_num_cat STRUCT(key INT, value FLOAT)[][], quad_cat STRUCT(key1 INT, key2 INT, value FLOAT)[][])"
-    query = "select linreg_train("+str_triple+cast+", 0::INTEGER, 0.001::FLOAT, 0::FLOAT, 10000::INTEGER, false, false)"
+    query = "select lda_train("+str_triple+cast+", 0, 0, false)"
     params = conn.sql(query).fetchall()
-    result_pred = conn.sql("SELECT id, linreg_predict("+str(params[0][0])+"::FLOAT[], false, false, s_width, p_length, p_width, target) AS pred FROM iris_test").df()
-    df = df_test[["id", "s_length"]].merge(result_pred, left_on='id', right_on='id')
-    r2_ddb = r2_score(df["s_length"], df["pred"]);
-    print("DuckDB R2: ", r2_score(df["s_length"], df["pred"]))
+    predict = conn.sql("SELECT id, lda_predict ("+str(params[0][0])+"::float[], false, s_length, s_width, p_length, p_width) as pred from iris_test").df()
     
-    df_train_encoded = pd.get_dummies(df_train, columns=['target'])
-    df_test_encoded = pd.get_dummies(df_test, columns=['target'])
-    reg = LinearRegression().fit(df_train_encoded.drop(["s_length", "id"], axis=1), df_train_encoded["s_length"])
-    r2_py = reg.score(df_test_encoded.drop(["s_length", "id"], axis=1), df_test_encoded["s_length"])
-    print("SKLearn R2: ", reg.score(df_test_encoded.drop(["s_length", "id"], axis=1), df_test_encoded["s_length"]))
+    df = df_test[["id", "target"]].merge(predict, left_on='id', right_on='id')
+    acc_ddb = accuracy_score(df["target"], df["pred"]);
+    print("Accuracy DuckDB LDA: ", acc_ddb)
+    clf = LinearDiscriminantAnalysis(solver = 'lsqr', shrinkage=0)
+    clf.fit(df_train.drop(["target", "id"], axis=1), df_train["target"])
+    acc_sklearn = clf.score(df_test.drop(["target", "id"], axis=1), df_test["target"])
     
-    assert (round(r2_ddb, 3) == round(r2_py, 3))
+    print("Accuracy LDA SKLearn ", acc_sklearn)
     
-def test_linreg_norm(in_data):
+    assert (round(acc_ddb, 3) == round(acc_sklearn, 3))
+
+def test_lda_norm(in_data):
     conn = in_data[0]
     df_train = in_data[1]
     df_test = in_data[2]
-    triple = conn.sql("SELECT sum_to_triple_4_1(s_length, s_width, p_length, p_width, target) from iris_train;").fetchall()
+    
+    triple = conn.sql("SELECT sum_to_triple_4_1(s_length, s_width, p_length, p_width, target) as agg from iris_train;").fetchall()
     str_triple = str(triple[0][0])
     cast = "::STRUCT(N int, lin_agg FLOAT[], quad_agg FLOAT[], lin_cat STRUCT(key INT, value FLOAT)[][], quad_num_cat STRUCT(key INT, value FLOAT)[][], quad_cat STRUCT(key1 INT, key2 INT, value FLOAT)[][])"
-    query = "select linreg_train("+str_triple+cast+", 0::INTEGER, 0.001::FLOAT, 0::FLOAT, 10000::INTEGER, false, true)"
+    query = "select lda_train("+str_triple+cast+", 0, 0, true)"
     params = conn.sql(query).fetchall()
-    result_pred = conn.sql("SELECT id, linreg_predict("+str(params[0][0])+"::FLOAT[], false, true, s_width, p_length, p_width, target) AS pred FROM iris_test").df()
-    df = df_test[["id", "s_length"]].merge(result_pred, left_on='id', right_on='id')
-    r2_ddb = r2_score(df["s_length"], df["pred"]);
-    print("DuckDB R2: ", r2_score(df["s_length"], df["pred"]))
+    predict = conn.sql("SELECT id, lda_predict ("+str(params[0][0])+"::float[], true, s_length, s_width, p_length, p_width) as pred from iris_test").df()
     
-    df_train_encoded = pd.get_dummies(df_train, columns=['target'])
-    df_test_encoded = pd.get_dummies(df_test, columns=['target'])
-    reg = LinearRegression().fit(df_train_encoded.drop(["s_length", "id"], axis=1), df_train_encoded["s_length"])
-    r2_py = reg.score(df_test_encoded.drop(["s_length", "id"], axis=1), df_test_encoded["s_length"])
-    print("SKLearn R2: ", reg.score(df_test_encoded.drop(["s_length", "id"], axis=1), df_test_encoded["s_length"]))
+    df = df_test[["id", "target"]].merge(predict, left_on='id', right_on='id')
+    acc_ddb = accuracy_score(df["target"], df["pred"]);
+    print("Accuracy DuckDB LDA: ", acc_ddb)
+    clf = LinearDiscriminantAnalysis(solver = 'lsqr', shrinkage=0)
+    clf.fit(df_train.drop(["target", "id"], axis=1), df_train["target"])
+    acc_sklearn = clf.score(df_test.drop(["target", "id"], axis=1), df_test["target"])
     
-    assert (round(r2_ddb, 3) == round(r2_py, 3))
-
+    print("Accuracy LDA SKLearn ", acc_sklearn)
+    
+    assert (round(acc_ddb, 3) == round(acc_sklearn, 3))

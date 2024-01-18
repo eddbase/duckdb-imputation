@@ -149,8 +149,8 @@ At the moment these functions only operate with float/integers, while DuckDB ten
 
 #### Functions:
 
-* `lda_train`
-* `lda_predict`
+* `lda_train (label from 0, shrinkage :float, normalize :boolean)`
+* `lda_predict (params: struct, normalize: boolean, columns)`
 * `linreg_train (triple: triple, label: integer from 1, learning_rate: float, regularization: float, max_iterations: integer, include_variance: boolean, normalize: boolean)`
 * `linreg_predict (train_params, add_noise: boolean, normalize: boolean, columns)`
 * `qda_train (triples: triple[], labels: integer[], normalize: boolean)`
@@ -158,7 +158,7 @@ At the moment these functions only operate with float/integers, while DuckDB ten
 * `nb_train (nb_aggegates: nb_aggregates[], labels: int[])`
 * `nb_predict (params:float[], normalize: bool, columns)`
 
-#### Example
+#### Examples
 
 The following query computes a triple of aggregates over a join. A triple of aggregates for each table is computed at the beginning, grouping by the join key. They are then multiplied together and summed to compute the final aggregate.
 

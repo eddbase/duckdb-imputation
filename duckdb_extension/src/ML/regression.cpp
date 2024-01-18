@@ -15,6 +15,16 @@
 extern "C" void dgemv (char *TRANSA, int *M, int* N, double *ALPHA,
                       double *A, int *LDA, double *X, int *INCX, double *BETA, double *Y, int *INCY);
 
+static void print_matrix(size_t sz, const double *m)
+{
+    for (size_t i = 0; i < sz; i++)
+    {
+        for(size_t j = 0; j < sz; j++)
+        {
+            std::cout<< i <<", "<<j<<" -> "<<m[(i * sz) + j]<<std::endl;
+        }
+    }
+}
 
 void compute_gradient(size_t num_params, size_t label_idx,
                       const double* sigma, const std::vector<double> &params,
@@ -111,10 +121,10 @@ void ML::ridge_linear_regression(duckdb::DataChunk &args, duckdb::ExpressionStat
   cofactor cofactor;
   extract_data(args.data[0], &cofactor, 1);//duckdb::value passed as
 
-  //for(size_t i=0; i<cofactor.lin.size(); i++)
-  //  std::cout<<"LINEAR AGG: "<<cofactor.lin[i]<<std::endl;
+  for(size_t i=0; i<cofactor.lin.size(); i++)
+    std::cout<<"LINEAR AGG: "<<cofactor.lin[i]<<std::endl;
 
-  if (cofactor.num_continuous_vars <= label) {
+  if (cofactor.num_continuous_vars < label) {
     std::cout<<"label ID >= number of continuous attributes";
     //return {};
   }
@@ -131,6 +141,8 @@ void ML::ridge_linear_regression(duckdb::DataChunk &args, duckdb::ExpressionStat
   std::vector <double> update(num_params, 0);
 
   build_sigma_matrix(cofactor, num_params, -1, cat_array, cat_vars_idxs, 0, sigma);
+  print_matrix(num_params, sigma);
+
   double *means = NULL;
   double *std = NULL;
   if (normalize){
@@ -221,7 +233,7 @@ void ML::ridge_linear_regression(duckdb::DataChunk &args, duckdb::ExpressionStat
 
     step_size = compute_step_size(step_size, num_params, learned_coeff, prev_learned_coeff, grad, prev_grad);
     prev_error = error;
-    //std::cout<<"Error "<<error<<std::endl;
+    std::cout<<"Error "<<error<<std::endl;
     num_iterations++;
   } while (num_iterations < max_num_iterations);
   double variance = 0;
@@ -425,6 +437,7 @@ void ML::linreg_impute(duckdb::DataChunk &args, duckdb::ExpressionState &state, 
   for(size_t row=0; row<size; row++) {
 
     double result = params[start_params]; // init with intercept
+    std::cout<<"start param: "<<result;
 
     if (normalize) {
       for (size_t i = 0; i < num_cols; i++) { // build num. pred.
@@ -452,7 +465,8 @@ void ML::linreg_impute(duckdb::DataChunk &args, duckdb::ExpressionState &state, 
           break;
         index++;
       }
-      if (normalize) {
+        std::cout<<"search class "<<curr_class<<" found at "<<index<<" cat col index "<<i<<" out of "<<cat_cols<<std::endl;
+        if (normalize) {
         for (size_t j = start; j < index; j++) {
           result +=
               (double)((params[j + start_params + num_cols + 1]) *
@@ -468,10 +482,11 @@ void ML::linreg_impute(duckdb::DataChunk &args, duckdb::ExpressionState &state, 
                        (0 - (params[1 + (2 * num_cols) + max_cat_vars_idx +
                                     start_params + j])));
         }
-
-      } else {
+      }
+        else {
         result += (double)(params[index + start_params + num_cols +
-                                  1]); // skip continous vars, class idx and unique class
+                                  1]); // skip continous vars, class idx and unique class (+1 because of constant term)
+                                  std::cout<<"categorical param value: "<<index + start_params + num_cols + 1<<std::endl;
       }
     }
 

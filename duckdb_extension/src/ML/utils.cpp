@@ -55,12 +55,14 @@ void extract_data(const duckdb::Vector &triple, cofactor *cofactor, size_t n_cof
     auto cat_lin_vals = duckdb::FlatVector::GetData<float>(*((lin_struct_vector)[1]));//raw data
     //std::cerr<<"d"<<std::endl;
     auto sublist_meta = duckdb::ListVector::GetData(v_cat_lin);
-    //std::cerr<<"d"<<std::endl;
+    std::cout<<"cat cols "<<cat_cols<<std::endl;
     for(size_t k =0; k<n_cofactor; k++){
       for(idx_t i=0;i<cat_cols;i++) {//for each cat variable
         cofactor[k].lin_cat.emplace_back();//add new map
-        for(size_t j=0; j<sublist_meta[i].length; j++){//how many records in this struct
-          cofactor[k].lin_cat[i][cat_lin_keys[j + sublist_meta[i + (k*cat_cols)].offset]] = cat_lin_vals[j + sublist_meta[i+(k*cat_cols)].offset];
+        for(size_t j=0; j<sublist_meta[i+ (k*cat_cols)].length; j++){//how many records in this struct
+            std::cout<<"key:  "<<cat_lin_keys[j + sublist_meta[i + (k*cat_cols)].offset]<<"value:  "<<cat_lin_vals[j + sublist_meta[i+(k*cat_cols)].offset]<<" index "<<j + sublist_meta[i + (k*cat_cols)].offset<<std::endl;
+            std::cout<<"cofactor "<<k<<"col "<<i<<std::endl;
+            cofactor[k].lin_cat[i][cat_lin_keys[j + sublist_meta[i + (k*cat_cols)].offset]] = cat_lin_vals[j + sublist_meta[i+(k*cat_cols)].offset];
         }
       }
     }
@@ -136,6 +138,9 @@ void extract_data(const duckdb::Vector &triple, cofactor *cofactor, size_t n_cof
           cofactor[i].cat_cat.emplace_back();
           for (size_t j = 0; j < cat_cat_meta[idx].length; j++) {
             cofactor[i].cat_cat[idx][std::pair<int, int>(cat_cat_key_1[j + cat_cat_meta[idx].offset], cat_cat_key_2[j + cat_cat_meta[idx].offset])] = cat_cat_vals[j + cat_cat_meta[idx].offset];
+
+            std::cout<<"CAT CAT key1 "<<cat_cat_key_1[j + cat_cat_meta[idx].offset]<<" key2 "<<cat_cat_key_2[j + cat_cat_meta[idx].offset]<<" value "<<cofactor[i].cat_cat[idx][std::pair<int, int>(cat_cat_key_1[j + cat_cat_meta[idx].offset], cat_cat_key_2[j + cat_cat_meta[idx].offset])]<<" index "<<j + cat_cat_meta[idx].offset<<std::endl;
+
           }
           idx++;
         }
@@ -174,7 +179,7 @@ void build_sigma_matrix(const cofactor &cofactor, size_t matrix_size, int label_
   // start numerical data:
   // count
   sigma[0] = cofactor.N;
-
+  //matrix_size already removes a label if needs to be removed
   // sum1
   const std::vector<float> &sum1_scalar_array = cofactor.lin;
   for (size_t i = 0; i < cofactor.num_continuous_vars; i++){
@@ -258,15 +263,15 @@ void build_sigma_matrix(const cofactor &cofactor, size_t matrix_size, int label_
   size_t curr_element = 0;
   for (size_t curr_cat_var = 0; curr_cat_var < cofactor.num_categorical_vars; curr_cat_var++){
     if (((size_t)label_categorical_sigma) == curr_cat_var) {
-      skip_sec_var_categories = (cat_vars_idxs[curr_cat_var + 1] - cat_vars_idxs[curr_cat_var]);
+      skip_sec_var_categories = (cat_vars_idxs[curr_cat_var + 1] - cat_vars_idxs[curr_cat_var]);//row skip, won't be changed once setted
       skipped_var_categories = skip_sec_var_categories;
     }
-    else
-      skipped_var_categories = 0;
+    else if (skip_sec_var_categories == 0)//not yet seen skip vars in rows
+      skipped_var_categories = 0;//reset if "column loop" iterates over a new row, unless the var to ignore has already been seen in row
 
-    for (size_t other_cat_var = curr_cat_var + 1; other_cat_var < cofactor.num_categorical_vars; other_cat_var++){
+    for (size_t other_cat_var = curr_cat_var; other_cat_var < cofactor.num_categorical_vars; other_cat_var++){//todo fix this in postgres
       if(((size_t)label_categorical_sigma) == other_cat_var)
-        skipped_var_categories = (cat_vars_idxs[curr_cat_var + 1] - cat_vars_idxs[curr_cat_var]);
+        skipped_var_categories = (cat_vars_idxs[other_cat_var + 1] - cat_vars_idxs[other_cat_var]);
 
       std::map<std::pair<int, int>, float> relation_data = cofactor.cat_cat[curr_element];
       curr_element++;
@@ -291,10 +296,13 @@ void build_sigma_matrix(const cofactor &cofactor, size_t matrix_size, int label_
         assert(key_index_other_var < cat_vars_idxs[other_cat_var + 1]);
 
         // add to sigma matrix
+
         key_index_curr_var += cofactor.num_continuous_vars + 1 - skip_sec_var_categories;
         key_index_other_var += cofactor.num_continuous_vars + 1 - skipped_var_categories;
 
-        sigma[(key_index_curr_var * matrix_size) + key_index_other_var] = item.second;
+          std::cout<<"sigma: adding in "<<key_index_curr_var<<", "<<key_index_other_var<<"(original key: "<<item.first.first<<" - "<<item.first.second<<" with val: "<<item.second<<std::endl;
+
+          sigma[(key_index_curr_var * matrix_size) + key_index_other_var] = item.second;
         sigma[(key_index_other_var * matrix_size) + key_index_curr_var] = item.second;
       }
     }
@@ -534,6 +542,7 @@ size_t n_cols_1hot_expansion(const cofactor *cofactors, size_t n_aggregates, uin
         size_t key_index = find_in_array(cat_val.first, cat_array, search_start, search_end);
 
         if (key_index == search_end) {
+            std::cout<<"Inserting "<<cat_val.first<<std::endl;
           uint64_t value_to_insert = cat_val.first;
           uint64_t tmp;
           for (size_t k = search_start; k < search_end; k++) {
@@ -548,7 +557,8 @@ size_t n_cols_1hot_expansion(const cofactor *cofactors, size_t n_aggregates, uin
         }
       }
     }
-    cat_vars_idxs[i + 1] = cat_vars_idxs[i] + (search_end - search_start);
+      std::cout<<"Done elements inserted: "<<search_end - search_start<<std::endl;
+      cat_vars_idxs[i + 1] = cat_vars_idxs[i] + (search_end - search_start);
     search_start = search_end;
   }
 

@@ -20,9 +20,9 @@ set(ENABLE_DOCTESTS ON)
 
 ExternalProject_Add(
         duckdb_ep
-        PREFIX "${CMAKE_BINARY_DIR}/lib/duckdb"
-        SOURCE_DIR "${CMAKE_SOURCE_DIR}/lib/duckdb"
-        INSTALL_DIR "${CMAKE_BINARY_DIR}/lib/duckdb/install"
+        PREFIX "${CMAKE_BINARY_DIR}/duckdb_extension/duckdb"
+        SOURCE_DIR "${CMAKE_SOURCE_DIR}/duckdb_extension/duckdb"
+        INSTALL_DIR "${CMAKE_BINARY_DIR}/duckdb_extension/duckdb/install"
         CMAKE_ARGS
         -G${CMAKE_GENERATOR}
         -DCMAKE_BUILD_PARALLEL_LEVEL=${CMAKE_BUILD_PARALLEL_LEVEL}
