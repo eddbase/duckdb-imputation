@@ -1,11 +1,12 @@
 
 
-#include "flight_partition.h"
+#include <imputation_low.h>
 #include <iostream>
-#include "partition.h"
-#include "sum_sub.h"
+#include <partition.h>
+#include <sum_sub.h>
 #include <iterator>
-void run_flight_partition(duckdb::Connection &con, const std::vector<std::string> &con_columns, const std::vector<std::string> &cat_columns, const std::vector<std::string> &con_columns_nulls, const std::vector<std::string> &cat_columns_nulls, const std::string &table_name, size_t mice_iters, const std::string sort){
+
+void run_MICE_low(duckdb::Connection &con, const std::vector<std::string> &con_columns, const std::vector<std::string> &cat_columns, const std::vector<std::string> &con_columns_nulls, const std::vector<std::string> &cat_columns_nulls, const std::string &table_name, size_t mice_iters, const std::string sort){
     //int parallelism = con.Query("SELECT current_setting('threads')")->GetValue<int>(0, 0);
     /*
     con.Query("ALTER TABLE "+table_name+" ADD COLUMN n_nulls INTEGER DEFAULT 10;")->Print();
@@ -114,7 +115,7 @@ void run_flight_partition(duckdb::Connection &con, const std::vector<std::string
             std::cout<<"Label index "<<label_index<<"\n";
 
             begin = std::chrono::high_resolution_clock::now();
-            std::vector <double> params = Triple::ridge_linear_regression(train_triple, label_index, 0.001, 0, 1000, true);
+            std::vector <double> params = std::vector<double>();//Triple::ridge_linear_regression(train_triple, label_index, 0.001, 0, 1000, true);
             end = std::chrono::high_resolution_clock::now();
             std::clog<<"Time train (ms): "<<std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count()<<"\n";
             //std::vector <double> params(test.size(), 0);
@@ -227,7 +228,7 @@ void run_flight_partition(duckdb::Connection &con, const std::vector<std::string
             size_t label_index = it - cat_columns.begin();
             std::cout<<"Categorical label index "<<label_index<<"\n";
             begin = std::chrono::high_resolution_clock::now();
-            auto train_params =  lda_train(train_triple, label_index, 0.4);
+            auto train_params =  duckdb::Value(0);//std::vector<double>();//lda_train(train_triple, label_index, 0.4);
             end = std::chrono::high_resolution_clock::now();
             std::cout<<"Train Time (ms): "<<std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count()<<"\n";
             std::clog<<"Train Time (ms): "<<std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count()<<"\n";

@@ -1,11 +1,11 @@
 
 
-#include "flight_partition.h"
+#include <imputation_low.h>
 #include <iostream>
-#include "partition.h"
-#include "sum_sub.h"
+#include <partition.h>
+#include <sum_sub.h>
 #include <iterator>
-void run_flight_partition_alt(duckdb::Connection &con, const std::vector<std::string> &con_columns, const std::vector<std::string> &cat_columns, const std::vector<std::string> &con_columns_nulls, const std::vector<std::string> &cat_columns_nulls, const std::string &table_name, size_t mice_iters, const std::string sort){
+void run_MICE_high(duckdb::Connection &con, const std::vector<std::string> &con_columns, const std::vector<std::string> &cat_columns, const std::vector<std::string> &con_columns_nulls, const std::vector<std::string> &cat_columns_nulls, const std::string &table_name, size_t mice_iters){
     //con.Query("SELECT OP_CARRIER, COUNT(*) FROM join_table WHERE WHEELS_ON_HOUR is not null GROUP BY OP_CARRIER")->Print();
     //int parallelism = con.Query("SELECT current_setting('threads')")->GetValue<int>(0, 0);
     build_list_of_uniq_categoricals(cat_columns, con, table_name);
@@ -75,7 +75,7 @@ void run_flight_partition_alt(duckdb::Connection &con, const std::vector<std::st
             std::cout<<"Label index "<<label_index<<"\n";
 
             begin = std::chrono::high_resolution_clock::now();
-            std::vector <double> params = Triple::ridge_linear_regression(train_triple, label_index, 0.001, 0, 1000, true);
+            std::vector <double> params = std::vector<double>();//Triple::ridge_linear_regression(train_triple, label_index, 0.001, 0, 1000, true);
             end = std::chrono::high_resolution_clock::now();
             std::clog<<"Train time (ms): "<<std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count()<<"\n";
             //std::vector <double> params(test.size(), 0);
@@ -215,7 +215,7 @@ void run_flight_partition_alt(duckdb::Connection &con, const std::vector<std::st
             size_t label_index = it - cat_columns.begin();
             std::cout<<"Categorical label index "<<label_index<<"\n";
             begin = std::chrono::high_resolution_clock::now();
-            auto train_params =  lda_train(train_triple, label_index, 0.4);
+            auto train_params = duckdb::Value(0);// std::vector<double>();//lda_train(train_triple, label_index, 0.4);
             end = std::chrono::high_resolution_clock::now();
             std::cout<<"Train Time (ms): "<<std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count()<<"\n";
             std::clog<<"Train Time (ms): "<<std::chrono::duration_cast<std::chrono::milliseconds>(end - begin).count()<<"\n";

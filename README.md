@@ -32,14 +32,14 @@ This repository includes an extension for DuckDB 0.9.2 and a C++ library. The Du
 
 
 1. Clone this repository.
-2. Clone DuckDB 0.9.2 from its repository and place it in duckdb_extension/duckdb. If you want to use another version, clone the specific version, but the library might not work.
+2. Clone DuckDB 0.9.2 from its repository and place it in duckdb_extension/duckdb. If you want to use another version, clone the specific version, but the library might not work (if you want to use the imputation code, you must use this version).
 
 	```sh
 	
 	cd duckdb_extension
 	git clone https://github.com/duckdb/duckdb.git
 	cd duckdb
-	git checkout 5ec85a719940a9fade15c38e7601712e9cef58d8 (9.2 3c695d7ba94d95d9facee48d395f46ed0bd72b46)
+	git checkout 3c695d7ba94d95d9facee48d395f46ed0bd72b46
 	git clean -df
 	
 	```
@@ -149,10 +149,10 @@ At the moment these functions only operate with float/integers, while DuckDB ten
 
 #### Functions:
 
-* `lda_train (label from 0, shrinkage :float, normalize :boolean)`
-* `lda_predict (params: struct, normalize: boolean, columns)`
+* `lda_train (triple: triple, label from 0, shrinkage :float, normalize :boolean)`
+* `lda_predict (params: float[], normalize: boolean, columns)`
 * `linreg_train (triple: triple, label: integer from 1, learning_rate: float, regularization: float, max_iterations: integer, include_variance: boolean, normalize: boolean)`
-* `linreg_predict (train_params, add_noise: boolean, normalize: boolean, columns)`
+* `linreg_predict (params float[], add_noise: boolean, normalize: boolean, columns)`
 * `qda_train (triples: triple[], labels: integer[], normalize: boolean)`
 * `qda_predict (params: float[], normalize: bool, columns)`
 * `nb_train (nb_aggegates: nb_aggregates[], labels: int[])`
@@ -190,10 +190,25 @@ In the test directory you can find additional examples.
 
 ## Imputation
 
-The imputation code uses the DuckDB code available in `duckdb_extension/duckdb`. **MAKE SURE YOUR CODE IS PATCHED BEFORE USING THE IMPUTATION LIBRARY**
+**MAKE SURE YOUR CODE IS PATCHED BEFORE USING THE IMPUTATION LIBRARY**
+
+The imputation code builds the patched DuckDB as a shared library (`duckdb_extension/duckdb`), the imputation functions as a shared library and a simple executable.
 
 ### Compile 
 ```
 cmake .
 make
+```
+
+## Usage
+
+First generate a DuckDB connection and load the ML library. Then you can use the following functions to run MICE, the output table will be `<table_name>_complete`:
+```
+void run_MICE_baseline(duckdb::Connection &con, const std::vector<std::string> &con_columns, const std::vector<std::string> &cat_columns, const std::vector<std::string> &con_columns_nulls, const std::vector<std::string> &cat_columns_nulls, const std::string &table_name, size_t mice_iters)
+```
+```
+void run_MICE_high(duckdb::Connection &con, const std::vector<std::string> &con_columns, const std::vector<std::string> &cat_columns, const std::vector<std::string> &con_columns_nulls, const std::vector<std::string> &cat_columns_nulls, const std::string &table_name, size_t mice_iters)
+```
+```
+void run_MICE_low(duckdb::Connection &con, const std::vector<std::string> &con_columns, const std::vector<std::string> &cat_columns, const std::vector<std::string> &con_columns_nulls, const std::vector<std::string> &cat_columns_nulls, const std::string &table_name, size_t mice_iters)
 ```

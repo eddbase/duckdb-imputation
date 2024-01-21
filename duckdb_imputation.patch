@@ -1,8 +1,8 @@
 diff --git a/src/catalog/catalog_set.cpp b/src/catalog/catalog_set.cpp
-index 8440786daf..705bd2ce24 100644
+index b8986da689..6f74724246 100644
 --- a/src/catalog/catalog_set.cpp
 +++ b/src/catalog/catalog_set.cpp
-@@ -14,6 +14,17 @@
+@@ -14,6 +14,14 @@
  #include "duckdb/transaction/duck_transaction.hpp"
  #include "duckdb/transaction/transaction_manager.hpp"
  
@@ -14,168 +14,169 @@ index 8440786daf..705bd2ce24 100644
 +#include "duckdb/storage/table/standard_column_data.hpp"
 +#include "duckdb/storage/table/validity_column_data.hpp"
 +
-+
-+
-+
  namespace duckdb {
  
  //! Class responsible to keep track of state when removing entries from the catalog.
-@@ -196,7 +207,186 @@ bool CatalogSet::AlterOwnership(CatalogTransaction transaction, ChangeOwnershipI
+@@ -196,7 +204,189 @@ bool CatalogSet::AlterOwnership(CatalogTransaction transaction, ChangeOwnershipI
  	return true;
  }
  
++
++
 +bool CatalogSet::CustomAlter(CatalogTransaction &transaction, const string &name, const string &col_name){
-+    std::cout << "Specialized Alter for Table "<< name << std::endl;
-+    EntryIndex entry_index;
-+    optional_ptr<CatalogEntry> entry = GetEntryInternal(transaction, name, &entry_index);
++        std::cout << "Specialized Alter for Table "<< name << std::endl;
++        EntryIndex entry_index;
++        optional_ptr<CatalogEntry> entry = GetEntryInternal(transaction, name, &entry_index);
 +
-+    DataTable &fact_table = (dynamic_cast<TableCatalogEntry *>(entry.get()))->GetStorage();
++        DataTable &fact_table = (dynamic_cast<TableCatalogEntry *>(entry.get()))->GetStorage();
 +
-+    entry = GetEntryInternal(transaction, "rep", &entry_index);
-+    if (!entry) {
-+        std::cout << "Table rep doesn't exist." << std::endl;
-+        return false;
-+    }
-+
-+    DataTable &rep_table = (dynamic_cast<TableCatalogEntry *>(entry.get()))->GetStorage();
-+
-+    std::cout << "fact table column size: " << fact_table.column_definitions.size() << std::endl;
-+    std::cout << "rep table column size: " << rep_table.column_definitions.size() << std::endl;
-+
-+    if (rep_table.column_definitions.size() != 1){
-+        std::cout << "rep table has non-single column." << std::endl;
-+        return false;
-+    }
-+
-+    // get the column idx fact to update
-+    idx_t updated_column;
-+
-+    for (updated_column = 0; updated_column < fact_table.column_definitions.size(); ++updated_column) {
-+        if (fact_table.column_definitions[updated_column].GetName() == col_name) {
-+            break;
-+        }
-+    }
-+
-+    if (updated_column == fact_table.column_definitions.size()){
-+        std::cout << "column doesn't exist." << std::endl;
-+        return false;
-+    }
-+    else {
-+        std::cout << "idx is: " << updated_column << std::endl;
-+    }
-+    shared_ptr<RowGroupCollection> factTableRowGroup = fact_table.row_groups;//still a table
-+    shared_ptr<RowGroupCollection> repTableRowGroup = rep_table.row_groups;
-+    //fact_table.row_groups.swap(rep_table.row_groups);
-+    //copy stats:
-+    factTableRowGroup->stats.MergeStats(updated_column, repTableRowGroup->stats.GetStats(0).Statistics());
-+    std::cout << "fact row group size: " << fact_table.GetTotalRows() << std::endl;
-+    std::cout << "rep row group size: " << rep_table.GetTotalRows() << std::endl;
-+
-+    //std::cout << "fact row group row_start: " << factTableRowGroup->row_start << std::endl;
-+    //std::cout << "rep row group row_start: " << repTableRowGroup->row_start << std::endl;
-+
-+
-+    shared_ptr<RowGroupSegmentTree> factTableRowGroupTree = factTableRowGroup->row_groups;
-+    shared_ptr<RowGroupSegmentTree> repTableRowGroupTree = repTableRowGroup->row_groups;
-+    //factTableRowGroupTree.swap();
-+    std::cout << "fact tree number of nodes: " << factTableRowGroupTree->nodes.size() << std::endl;
-+    std::cout << "rep tree number of nodes: " << repTableRowGroupTree->nodes.size() << std::endl;
-+
-+    RowGroup *factTable_group = factTableRowGroupTree->GetRootSegment();
-+    RowGroup *repTable_group = repTableRowGroupTree->GetRootSegment();
-+
-+
-+    while (factTable_group) {//iterate over tree
-+        factTable_group->MergeStatistics(updated_column, *repTable_group->GetStatistics(0));
-+        //std::cout<<"NEW STATISTICS: "<<factTable_group->GetStatistics(updated_column)->ToString()<<std::endl;
-+        //std::cout<<"NEW STATISTICS 2: "<<factTable_group->GetColumns()[updated_column]->GetStatistics()->ToString()<<std::endl;
-+
-+        ColumnData &repCol = *repTable_group->GetColumns()[0];//Get col to move (table has single col)
-+        if (repCol.type.InternalType() == PhysicalType::STRUCT || repCol.type.InternalType() == PhysicalType::LIST ||
-+            repCol.type.id() == LogicalTypeId::VALIDITY) {
-+            std::cout<<"Error, target column not StandardColumnData"<<std::endl;
-+            throw CatalogException("Cannot use custom alter, target column not StandardColumnData", entry->name);
++        entry = GetEntryInternal(transaction, "rep", &entry_index);
++        if (!entry) {
++            std::cout << "Table rep doesn't exist." << std::endl;
++            return false;
 +        }
 +
-+        auto start = repTable_group->GetColumns()[0]->start;
++        DataTable &rep_table = (dynamic_cast<TableCatalogEntry *>(entry.get()))->GetStorage();
 +
-+        LogicalType type = repCol.type;
-+        factTable_group->GetColumns()[updated_column] = factTable_group->GetColumns()[updated_column]->CreateColumn(
-+                factTable_group->GetBlockManager(), factTable_group->GetTableInfo(), updated_column, start,
-+                type, factTable_group->GetColumns()[updated_column]->parent);// needs to be factTable instead of repCol wrong block manager and info
++        std::cout << "fact table column size: " << fact_table.column_definitions.size() << std::endl;
++        std::cout << "rep table column size: " << rep_table.column_definitions.size() << std::endl;
 +
-+        //copy data
-+        idx_t offset = 0;
-+        factTable_group->GetColumns()[updated_column]->count = 0;
-+
-+        vector<SegmentNode<ColumnSegment>> segments = repCol.data.MoveSegments();
-+        repCol.count = 0;
-+        //((StandardColumnData &)repCol).data.Reinitialize();
-+
-+        for (size_t i = 0; i<segments.size(); i++) {
-+            ColumnSegment *segment = segments[i].node.get();
-+            auto &other = (ColumnSegment &)*segment;
-+            factTable_group->GetColumns()[updated_column]->data.AppendSegment(ColumnSegment::CreateSegment(other, start + offset));//Now data has been moved col->data->nodes->block
-+            offset += other.count;
-+            factTable_group->GetColumns()[updated_column]->count += other.count;
-+            //Need to destroy segment, now is invalid as data have been moved to new segment
-+            factTable_group->GetColumns()[updated_column]->data.Verify();
-+            //std::cout<<"SEGMENT COUNT: "<<factTable_group->GetColumns()[updated_column]->data.GetSegmentCount()<<std::endl;
-+        }
-+        std::shared_ptr<StandardColumnData> new_col = std::dynamic_pointer_cast<StandardColumnData>(factTable_group->GetColumns()[updated_column]);
-+
-+        //copy validity
-+
-+        vector<SegmentNode<ColumnSegment>> validitySegments = ((StandardColumnData &)repCol).validity.data.MoveSegments();
-+        ((StandardColumnData &)repCol).validity.count = 0;
-+
-+        offset = 0;
-+        new_col->validity.count = 0;
-+        for (size_t i = 0; i<validitySegments.size(); i++) {
-+            ColumnSegment *segment = validitySegments[i].node.get();
-+            auto &other = (ColumnSegment &)*segment;
-+            new_col->validity.data.AppendSegment(ColumnSegment::CreateSegment(other, start + offset));
-+            offset += segment->count;
-+            new_col->validity.count += segment->count;
++        if (rep_table.column_definitions.size() != 1){
++            std::cout << "rep table has non-single column." << std::endl;
++            return false;
 +        }
 +
-+        // update column
-+        //factTable_group->GetColumns()[updated_column]->column_index = updated_column;
-+        // copy stat
-+        //BaseStatistics::CreateEmpty
-+        //std::cout<<"STATISTICS 3-1: "<<factTable_group->GetColumns()[updated_column]->stats->statistics.ToString()<<std::endl;
-+        factTable_group->GetColumns()[updated_column]->stats = make_uniq<SegmentStatistics>(std::move(*repCol.stats));
-+        //std::cout<<"STATISTICS 3-2: "<<factTable_group->GetColumns()[updated_column]->stats->statistics.ToString()<<std::endl;
-+        //std::cout<<"STATISTICS 3-3: "<<factTable_group->GetColumns()[1]->stats->statistics.ToString()<<std::endl;
-+        //factTable_group->GetStatistics(updated_column)->Merge(*repTable_group->GetStatistics(0));
-+        //factTable_group->GetStatistics(updated_column) = repTable_group->GetStatistics(0);
++        // get the column idx fact to update
++        idx_t updated_column;
 +
-+        shared_ptr<ColumnData> factCol = factTable_group->GetColumns()[updated_column];
-+        //std::cout << "factCol->column_index: " << factCol->column_index << std::endl;
-+        // the info.table is still wrong...
-+        //std::cout << "factCol->info.table: " << factCol->info.table << std::endl;
++        for (updated_column = 0; updated_column < fact_table.column_definitions.size(); ++updated_column) {
++            if (fact_table.column_definitions[updated_column].GetName() == col_name) {
++                break;
++            }
++        }
 +
-+        factTable_group->Verify();
++        if (updated_column == fact_table.column_definitions.size()){
++            std::cout << "column doesn't exist." << std::endl;
++            return false;
++        }
++        else {
++            std::cout << "idx is: " << updated_column << std::endl;
++        }
++        shared_ptr<RowGroupCollection> factTableRowGroup = fact_table.row_groups;//still a table
++        shared_ptr<RowGroupCollection> repTableRowGroup = rep_table.row_groups;
++        //fact_table.row_groups.swap(rep_table.row_groups);
++        //copy stats:
++        factTableRowGroup->stats.MergeStats(updated_column, repTableRowGroup->stats.GetStats(0).Statistics());
++        std::cout << "fact row group size: " << fact_table.GetTotalRows() << std::endl;
++        std::cout << "rep row group size: " << rep_table.GetTotalRows() << std::endl;
 +
-+        factTable_group = (RowGroup *)factTable_group->Next();
-+        repTable_group = (RowGroup *)repTable_group->Next();
-+        //std::cout<<"A: "<<factTable_group<<" B: "<<repTable_group<<std::endl;
-+    }
++        //std::cout << "fact row group row_start: " << factTableRowGroup->row_start << std::endl;
++        //std::cout << "rep row group row_start: " << repTableRowGroup->row_start << std::endl;
 +
-+    factTableRowGroup->Verify();
-+    factTableRowGroupTree->Verify();
 +
-+    //rep_table.row_groups->RemoveColumn(0);
-+    //rep_table.row_groups->total_rows = 0;
-+    //repTableRowGroupTree->GetRootSegment()->GetColumns() = {};
-+    //repTableRowGroupTree->GetRootSegment()->InitializeEmpty({LogicalType::FLOAT});
-+    //rep_table.info->cardinality = 0;
-+    DropEntry(transaction, "rep", true, false);
-+    return true;
++        shared_ptr<RowGroupSegmentTree> factTableRowGroupTree = factTableRowGroup->row_groups;
++        shared_ptr<RowGroupSegmentTree> repTableRowGroupTree = repTableRowGroup->row_groups;
++        //factTableRowGroupTree.swap();
++        std::cout << "fact tree number of nodes: " << factTableRowGroupTree->nodes.size() << std::endl;
++        std::cout << "rep tree number of nodes: " << repTableRowGroupTree->nodes.size() << std::endl;
++
++        RowGroup *factTable_group = factTableRowGroupTree->GetRootSegment();
++        RowGroup *repTable_group = repTableRowGroupTree->GetRootSegment();
++
++
++        while (factTable_group) {//iterate over tree
++            factTable_group->MergeStatistics(updated_column, *repTable_group->GetStatistics(0));
++            //std::cout<<"NEW STATISTICS: "<<factTable_group->GetStatistics(updated_column)->ToString()<<std::endl;
++            //std::cout<<"NEW STATISTICS 2: "<<factTable_group->GetColumns()[updated_column]->GetStatistics()->ToString()<<std::endl;
++
++            ColumnData &repCol = *repTable_group->GetColumns()[0];//Get col to move (table has single col)
++            if (repCol.type.InternalType() == PhysicalType::STRUCT || repCol.type.InternalType() == PhysicalType::LIST ||
++                repCol.type.id() == LogicalTypeId::VALIDITY) {
++                std::cout<<"Error, target column not StandardColumnData"<<std::endl;
++                throw CatalogException("Cannot use custom alter, target column not StandardColumnData", entry->name);
++            }
++
++            auto start = repTable_group->GetColumns()[0]->start;
++
++            LogicalType type = repCol.type;
++            factTable_group->GetColumns()[updated_column] = factTable_group->GetColumns()[updated_column]->CreateColumn(
++                    factTable_group->GetBlockManager(), factTable_group->GetTableInfo(), updated_column, start,
++                    type, factTable_group->GetColumns()[updated_column]->parent);// needs to be factTable instead of repCol wrong block manager and info
++
++            //copy data
++            idx_t offset = 0;
++            factTable_group->GetColumns()[updated_column]->count = 0;
++
++            vector<SegmentNode<ColumnSegment>> segments = repCol.data.MoveSegments();
++            repCol.count = 0;
++            //((StandardColumnData &)repCol).data.Reinitialize();
++
++            for (size_t i = 0; i<segments.size(); i++) {
++                ColumnSegment *segment = segments[i].node.get();
++                auto &other = (ColumnSegment &)*segment;
++                factTable_group->GetColumns()[updated_column]->data.AppendSegment(ColumnSegment::CreateSegment(other, start + offset));//Now data has been moved col->data->nodes->block
++                offset += other.count;
++                factTable_group->GetColumns()[updated_column]->count += other.count;
++                //Need to destroy segment, now is invalid as data have been moved to new segment
++                factTable_group->GetColumns()[updated_column]->data.Verify();
++                //std::cout<<"SEGMENT COUNT: "<<factTable_group->GetColumns()[updated_column]->data.GetSegmentCount()<<std::endl;
++            }
++            std::shared_ptr<StandardColumnData> new_col = std::dynamic_pointer_cast<StandardColumnData>(factTable_group->GetColumns()[updated_column]);
++
++            //copy validity
++
++            vector<SegmentNode<ColumnSegment>> validitySegments = ((StandardColumnData &)repCol).validity.data.MoveSegments();
++            ((StandardColumnData &)repCol).validity.count = 0;
++
++            offset = 0;
++            new_col->validity.count = 0;
++            for (size_t i = 0; i<validitySegments.size(); i++) {
++                ColumnSegment *segment = validitySegments[i].node.get();
++                auto &other = (ColumnSegment &)*segment;
++                new_col->validity.data.AppendSegment(ColumnSegment::CreateSegment(other, start + offset));
++                offset += segment->count;
++                new_col->validity.count += segment->count;
++            }
++
++            // update column
++            //factTable_group->GetColumns()[updated_column]->column_index = updated_column;
++            // copy stat
++            //BaseStatistics::CreateEmpty
++            //std::cout<<"STATISTICS 3-1: "<<factTable_group->GetColumns()[updated_column]->stats->statistics.ToString()<<std::endl;
++            factTable_group->GetColumns()[updated_column]->stats = make_uniq<SegmentStatistics>(std::move(*repCol.stats));
++            //std::cout<<"STATISTICS 3-2: "<<factTable_group->GetColumns()[updated_column]->stats->statistics.ToString()<<std::endl;
++            //std::cout<<"STATISTICS 3-3: "<<factTable_group->GetColumns()[1]->stats->statistics.ToString()<<std::endl;
++            //factTable_group->GetStatistics(updated_column)->Merge(*repTable_group->GetStatistics(0));
++            //factTable_group->GetStatistics(updated_column) = repTable_group->GetStatistics(0);
++
++            shared_ptr<ColumnData> factCol = factTable_group->GetColumns()[updated_column];
++            //std::cout << "factCol->column_index: " << factCol->column_index << std::endl;
++            // the info.table is still wrong...
++            //std::cout << "factCol->info.table: " << factCol->info.table << std::endl;
++
++            factTable_group->Verify();
++
++            factTable_group = (RowGroup *)factTable_group->Next();
++            repTable_group = (RowGroup *)repTable_group->Next();
++            //std::cout<<"A: "<<factTable_group<<" B: "<<repTable_group<<std::endl;
++        }
++
++        factTableRowGroup->Verify();
++        factTableRowGroupTree->Verify();
++
++        //rep_table.row_groups->RemoveColumn(0);
++        //rep_table.row_groups->total_rows = 0;
++        //repTableRowGroupTree->GetRootSegment()->GetColumns() = {};
++        //repTableRowGroupTree->GetRootSegment()->InitializeEmpty({LogicalType::FLOAT});
++        //rep_table.info->cardinality = 0;
++        DropEntry(transaction, "rep", true, false);
++        return true;
 +
 +}
 +
++
  bool CatalogSet::AlterEntry(CatalogTransaction transaction, const string &name, AlterInfo &alter_info) {
++
 +    if ((dynamic_cast<AlterTableInfo &>(alter_info)).alter_table_type == AlterTableType::SET_DEFAULT){
 +
 +        SetDefaultInfo &add_column_info = dynamic_cast<SetDefaultInfo &>(alter_info);
@@ -203,166 +204,151 @@ index 8440786daf..705bd2ce24 100644
 +    }
 +
 +
-+
  	// lock the catalog for writing
  	lock_guard<mutex> write_lock(catalog.GetWriteLock());
- 
+ 	// lock this catalog set to disallow reading
 diff --git a/src/include/duckdb/catalog/catalog_set.hpp b/src/include/duckdb/catalog/catalog_set.hpp
-index dba2d66193..4ec56d6f28 100644
+index 5e980e3aef..2029f73e34 100644
 --- a/src/include/duckdb/catalog/catalog_set.hpp
 +++ b/src/include/duckdb/catalog/catalog_set.hpp
-@@ -80,8 +80,9 @@ public:
+@@ -78,7 +78,7 @@ public:
  	                            DependencyList &dependencies);
- 
- 	DUCKDB_API bool AlterEntry(CatalogTransaction transaction, const string &name, AlterInfo &alter_info);
+ 	DUCKDB_API bool CreateEntry(ClientContext &context, const string &name, unique_ptr<CatalogEntry> value,
+ 	                            DependencyList &dependencies);
+-
 +    DUCKDB_API bool CustomAlter(CatalogTransaction &transaction, const string &name, const string &col_name);
+ 	DUCKDB_API bool AlterEntry(CatalogTransaction transaction, const string &name, AlterInfo &alter_info);
  
--	DUCKDB_API bool DropEntry(CatalogTransaction transaction, const string &name, bool cascade,
-+    DUCKDB_API bool DropEntry(CatalogTransaction transaction, const string &name, bool cascade,
- 	                          bool allow_drop_internal = false);
- 	DUCKDB_API bool DropEntry(ClientContext &context, const string &name, bool cascade,
- 	                          bool allow_drop_internal = false);
+ 	DUCKDB_API bool DropEntry(CatalogTransaction transaction, const string &name, bool cascade,
 diff --git a/src/include/duckdb/storage/data_table.hpp b/src/include/duckdb/storage/data_table.hpp
-index b65ace9c4a..200b39a3b8 100644
+index b65ace9c4a..0710afa0ca 100644
 --- a/src/include/duckdb/storage/data_table.hpp
 +++ b/src/include/duckdb/storage/data_table.hpp
-@@ -66,6 +66,9 @@ public:
- 	vector<ColumnDefinition> column_definitions;
- 	//! A reference to the database instance
- 	AttachedDatabase &db;
+@@ -193,6 +193,9 @@ public:
+ 	void VerifyAppendConstraints(TableCatalogEntry &table, ClientContext &context, DataChunk &chunk,
+ 	                             ConflictManager *conflict_manager = nullptr);
+ 
 +    //! The row groups of the table
 +    shared_ptr<RowGroupCollection> row_groups;
 +
- 
  public:
- 	//! Returns a list of types of the table
-@@ -219,8 +222,6 @@ private:
+ 	static void VerifyUniqueIndexes(TableIndexList &indexes, ClientContext &context, DataChunk &chunk,
+ 	                                ConflictManager *conflict_manager);
+@@ -215,12 +218,11 @@ private:
+ 	                                      DataChunk &chunk);
+ 	void VerifyDeleteForeignKeyConstraint(const BoundForeignKeyConstraint &bfk, ClientContext &context,
+ 	                                      DataChunk &chunk);
+-
  private:
  	//! Lock for appending entries to the table
  	mutex append_lock;
--	//! The row groups of the table
+ 	//! The row groups of the table
 -	shared_ptr<RowGroupCollection> row_groups;
++	//shared_ptr<RowGroupCollection> row_groups;
  	//! Whether or not the data table is the root DataTable for this table; the root DataTable is the newest version
  	//! that can be appended to
  	atomic<bool> is_root;
 diff --git a/src/include/duckdb/storage/table/column_data.hpp b/src/include/duckdb/storage/table/column_data.hpp
-index c278b3a548..e4a7dc37f5 100644
+index c278b3a548..dd42c7eba3 100644
 --- a/src/include/duckdb/storage/table/column_data.hpp
 +++ b/src/include/duckdb/storage/table/column_data.hpp
-@@ -145,6 +145,10 @@ public:
- 	void MergeStatistics(const BaseStatistics &other);
+@@ -146,6 +146,11 @@ public:
  	void MergeIntoStatistics(BaseStatistics &other);
  	unique_ptr<BaseStatistics> GetStatistics();
+ 
 +    //! The segments holding the data of this column segment
 +    ColumnSegmentTree data;
 +    //! The stats of the root segment
 +    unique_ptr<SegmentStatistics> stats;
- 
- protected:
- 	//! Append a transient segment
-@@ -157,17 +161,14 @@ protected:
- 	template <bool SCAN_COMMITTED, bool ALLOW_UPDATES>
- 	idx_t ScanVector(TransactionData transaction, idx_t vector_index, ColumnScanState &state, Vector &result);
- 
 +
  protected:
--	//! The segments holding the data of this column segment
+ 	//! Append a transient segment
+ 	void AppendTransientSegment(SegmentLock &l, idx_t start_row);
+@@ -159,7 +164,7 @@ protected:
+ 
+ protected:
+ 	//! The segments holding the data of this column segment
 -	ColumnSegmentTree data;
++	//ColumnSegmentTree data;
  	//! The lock for the updates
  	mutex update_lock;
  	//! The updates for this column segment
- 	unique_ptr<UpdateSegment> updates;
+@@ -167,7 +172,7 @@ protected:
  	//! The internal version of the column data
  	idx_t version;
--	//! The stats of the root segment
+ 	//! The stats of the root segment
 -	unique_ptr<SegmentStatistics> stats;
++	//unique_ptr<SegmentStatistics> stats;
  };
  
  } // namespace duckdb
 diff --git a/src/include/duckdb/storage/table/row_group.hpp b/src/include/duckdb/storage/table/row_group.hpp
-index 5b416ba117..faaf3aaefa 100644
+index 5b416ba117..1cf08bb6bc 100644
 --- a/src/include/duckdb/storage/table/row_group.hpp
 +++ b/src/include/duckdb/storage/table/row_group.hpp
-@@ -140,6 +140,7 @@ public:
- 	void Verify();
+@@ -148,13 +148,15 @@ public:
+ 	static void Serialize(RowGroupPointer &pointer, Serializer &serializer);
+ 	static RowGroupPointer Deserialize(Deserializer &deserializer);
  
- 	void NextVector(CollectionScanState &state);
 +    vector<shared_ptr<ColumnData>> &GetColumns();
- 
- 	idx_t DeleteRows(idx_t vector_idx, transaction_t transaction_id, row_t rows[], idx_t count);
- 	RowVersionManager &GetOrCreateVersionInfo();
-@@ -154,7 +155,6 @@ private:
++
+ private:
+ 	shared_ptr<RowVersionManager> &GetVersionInfo();
+ 	shared_ptr<RowVersionManager> &GetOrCreateVersionInfoPtr();
  
  	ColumnData &GetColumn(storage_t c);
  	idx_t GetColumnCount() const;
 -	vector<shared_ptr<ColumnData>> &GetColumns();
++	//vector<shared_ptr<ColumnData>> &GetColumns();
  
  	template <TableScanType TYPE>
  	void TemplatedScan(TransactionData transaction, CollectionScanState &state, DataChunk &result);
 diff --git a/src/include/duckdb/storage/table/row_group_collection.hpp b/src/include/duckdb/storage/table/row_group_collection.hpp
-index f5bdc86b6d..a879081f3c 100644
+index f5bdc86b6d..5e79e74b24 100644
 --- a/src/include/duckdb/storage/table/row_group_collection.hpp
 +++ b/src/include/duckdb/storage/table/row_group_collection.hpp
-@@ -111,6 +111,11 @@ public:
- 	DataTableInfo &GetTableInfo() {
+@@ -112,6 +112,11 @@ public:
  		return *info;
  	}
+ 
 +    //! The segment trees holding the various row_groups of the table
 +    shared_ptr<RowGroupSegmentTree> row_groups;
 +    //! Table statistics
 +    TableStatistics stats;
 +
- 
  private:
  	bool IsEmpty(SegmentLock &) const;
-@@ -125,10 +130,6 @@ private:
- 	//! The column types of the row group collection
+ 
+@@ -126,9 +131,9 @@ private:
  	vector<LogicalType> types;
  	idx_t row_start;
--	//! The segment trees holding the various row_groups of the table
+ 	//! The segment trees holding the various row_groups of the table
 -	shared_ptr<RowGroupSegmentTree> row_groups;
--	//! Table statistics
++	//shared_ptr<RowGroupSegmentTree> row_groups;
+ 	//! Table statistics
 -	TableStatistics stats;
++	//TableStatistics stats;
  };
  
  } // namespace duckdb
 diff --git a/src/include/duckdb/storage/table/segment_tree.hpp b/src/include/duckdb/storage/table/segment_tree.hpp
-index 207c148166..e3a133c510 100644
+index 207c148166..5347f2caea 100644
 --- a/src/include/duckdb/storage/table/segment_tree.hpp
 +++ b/src/include/duckdb/storage/table/segment_tree.hpp
-@@ -36,6 +36,9 @@ public:
- 	virtual ~SegmentTree() {
+@@ -264,6 +264,7 @@ public:
+ 			offset += entry.node->count;
+ 		}
  	}
- 
-+    //! The nodes in the tree, can be binary searched
 +    vector<SegmentNode<T>> nodes;
-+
- 	//! Locks the segment tree. All methods to the segment tree either lock the segment tree, or take an already
- 	//! obtained lock.
- 	SegmentLock Lock() {
-@@ -274,8 +277,6 @@ protected:
- 	}
+ 
+ protected:
+ 	atomic<bool> finished_loading;
+@@ -275,7 +276,7 @@ protected:
  
  private:
--	//! The nodes in the tree, can be binary searched
+ 	//! The nodes in the tree, can be binary searched
 -	vector<SegmentNode<T>> nodes;
++	//vector<SegmentNode<T>> nodes;
  	//! Lock to access or modify the nodes
  	mutex node_lock;
  
-diff --git a/tools/shell/CMakeLists.txt b/tools/shell/CMakeLists.txt
-index 4f0441a090..a301a52178 100644
---- a/tools/shell/CMakeLists.txt
-+++ b/tools/shell/CMakeLists.txt
-@@ -17,7 +17,11 @@ target_link_libraries(shell sqlite3_api_wrapper_static
- link_threads(shell)
- if(STATIC_LIBCPP)
-   message("Statically linking CLI")
--  target_link_libraries(shell -static-libstdc++ -static-libgcc)
-+  if(APPLE)
-+  target_link_libraries(shell -static-libstdc++)
-+  else ()
-+    target_link_libraries(shell -static-libstdc++ -static-libgcc)
-+  endif()
- endif()
- 
- if(NOT AMALGAMATION_BUILD AND NOT WIN32)

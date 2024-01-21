@@ -679,7 +679,7 @@ void init_baseline(const std::string &table_name, const std::vector<std::string>
     query += " FROM "+table_name+" LIMIT 10000";
     auto collection = con.Query(query);
 
-    int parallelism = con.Query("SELECT current_setting('threads')")->GetValue<int>(0, 0);
+    //int parallelism = con.Query("SELECT current_setting('threads')")->GetValue<int>(0, 0);
     //con.Query("SET threads TO 1;");
 
     con.Query("CREATE TABLE "+table_name+"_complete AS SELECT * FROM "+table_name);

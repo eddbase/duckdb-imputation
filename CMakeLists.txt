@@ -51,7 +51,7 @@ endif()
 
 add_dependencies(duckdb duckdb_ep)
 
-add_library(duckdb_library SHARED imputation/triple/sub.cpp imputation/include/sum_sub.h imputation/algorithms/partition.cpp imputation/include/partition.h imputation/algorithms/flight_partition.cpp imputation/include/flight_partition.h imputation/algorithms/flight_baseline.cpp imputation/include/flight_baseline.h imputation/triple/sum_nb.cpp imputation/algorithms/flight_partition_2.cpp imputation/include/flight_partition_2.h)
+add_library(duckdb_library SHARED imputation/triple/sub.cpp imputation/triple/sum.cpp imputation/include/sum_sub.h imputation/algorithms/partition.cpp imputation/include/partition.h imputation/algorithms/imputation_low.cpp imputation/include/imputation_low.h imputation/algorithms/imputation_base.cpp imputation/include/imputation_baseline.h imputation/triple/sum_nb.cpp imputation/algorithms/imputation_high.cpp imputation/include/imputation_high.h)
 
 set(Boost_USE_STATIC_LIBS OFF)
 set(Boost_USE_MULTITHREADED ON)

@@ -2,33 +2,80 @@
 
 #include <duckdb.hpp>
 
-#include <helper.h>
-#include "partition.h"
+#include <imputation_baseline.h>
+#include <imputation_low.h>
+#include <imputation_high.h>
+
+#include <random>
+
+#include <partition.h>
 #include <vector>
 
+std::vector<int> extract_sample(unsigned int samples_to_extract, unsigned int range, unsigned int seed = std::random_device{}()){
+    std::vector<int> tid_sampled(range);
+    for(int i=0; i<range; i++){
+        tid_sampled[i] = i;
+    }
+    unsigned int curr_size = range;
+
+
+    std::mt19937 gen(seed);
+    for(size_t i=0; i<(int)(samples_to_extract); i++){
+        std::uniform_int_distribution<> distr(0, curr_size-1); // define the range
+        int random_idx = distr(gen);
+        int val = tid_sampled[random_idx];
+        tid_sampled[random_idx] = tid_sampled[curr_size];
+        tid_sampled[curr_size] = val;
+        curr_size--;
+    }
+
+    //return last elements
+    std::vector<int> result(samples_to_extract);
+    for(int i=0; i<samples_to_extract; i++)
+        result[i] = tid_sampled[curr_size+i];
+    return result;
+
+}
+
 int main(){
-    std::cout<<"Hello world";
     duckdb::DBConfig c;
-    c.SetOption("allow_unsigned_extensions", duckdb::Value(true));
+    //c.SetOption("allow_unsigned_extensions", duckdb::Value(true));
+    c.options.allow_unsigned_extensions = true;
     duckdb::DuckDB db(":memory:", &c);
     duckdb::Connection con(db);
 
-    std::vector<std::string> con_columns = {"a", "b", "c"};;
-    std::vector<std::string> cat_columns = {"d", "e", "f"};
-    ML_lib::register_functions(*con.context, {con_columns.size()}, {cat_columns.size()});
+    //Load library
+    con.Query("INSTALL '../duckdb_extension/build/release/extension/duckdb_imputation/duckdb_imputation.duckdb_extension'")->Print();
+    con.Query("load duckdb_imputation")->Print();
+    //load dataset
 
-    std::string ttt = "CREATE TABLE test(gb INTEGER, a FLOAT, b FLOAT, c FLOAT, d INTEGER, e INTEGER, f INTEGER);";
-    con.Query(ttt);
-    ttt = "INSERT INTO test VALUES (1,1,2,3,4,5,6), (1,5,6,7,8,9,10), (2,2,1,3,4,6,8), (1,5,7,6,8,10,12), (2,2,1,3,4,6,8)";
-    con.Query(ttt);
+    con.Query("CREATE TABLE iris_orig(sepal_length FLOAT, sepal_width FLOAT, petal_length FLOAT, petal_width FLOAT, target INTEGER);");
+    con.Query("INSERT INTO iris_orig SELECT * FROM read_csv('../iris.csv', header = true, AUTO_DETECT=TRUE);")->Print();
 
-    std::string cat_columns_query;
-    std::string predict_column_query;
-    size_t label = 0;//label inside categoricals
-    build_list_of_uniq_categoricals(cat_columns, con, "test");
-    con.Query("SELECT * FROM test")->Print();
-    con.Query("SELECT triple_sum_no_lift(a,b,c,d,e,f) FROM test")->Print();
-    auto triple = con.Query("SELECT triple_sum_no_lift(a,b,c,d,e,f) FROM test")->GetValue(0,0);
-    auto train_params =  lda_train(triple, label, 0.4);
-    con.Query("SELECT list_extract("+predict_column_query+", predict_lda("+train_params.ToString()+"::FLOAT[], a, b,c,"+cat_columns_query+")+1) FROM test")->Print();
+    con.Query("CREATE SEQUENCE id_sequence START 1");
+    con.Query("ALTER TABLE iris_orig ADD COLUMN id INT DEFAULT nextval('id_sequence')");
+
+    con.Query("SELECT * FROM iris_orig;")->Print();
+    con.Query("CREATE TABLE iris_imputed AS SELECT * FROM iris_orig;")->Print();
+
+    int size = con.Query("SELECT count(*) FROM iris_orig;")->GetValue<int>(0,0);
+
+    //random generator
+    std::vector<std::string> columns = {"sepal_length", "petal_length", "target"};
+
+    for(size_t i=0; i<columns.size(); i++) {
+        std::vector<int> tuples_null = extract_sample((int)(0.2*size), size, i);
+        std::ostringstream oss;
+        std::copy(begin(tuples_null), end(tuples_null), std::ostream_iterator<int>(oss, ","));
+        con.Query("UPDATE iris_imputed SET "+columns[i]+" = null where id in ("+oss.str()+");")->Print();
+    }
+
+    con.Query("SELECT * from iris_imputed")->Print();
+    run_MICE_baseline(con, {"sepal_length", "sepal_width", "petal_length", "petal_width"}, {"target"}, {"sepal_length", "petal_length"}, {"target"}, "iris_imputed", 5);
+    con.Query("SELECT * from iris_imputed_complete")->Print();
+
+
+
+    //load iris
+
 }
